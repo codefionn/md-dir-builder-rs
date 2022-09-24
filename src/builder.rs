@@ -111,13 +111,17 @@ fn broad_file_search(path_str: String) -> Vec<String> {
 
 /// Process a markdown file. Converts it to HTML and saves the result in ``map``.
 /// During processing, the a lock is generated in ``processing``.
+///
+/// ## Result
+///
+/// Returns ``true`` on success, otherwise ``false``.
 async fn process_file(
     dir: &Path,
     file_str: &String,
     map: Arc<Mutex<HashMap<String, String, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
-) {
+) -> bool {
     let webpath = format!("/{}", file_str);
     log::debug!("Processing file {}", webpath);
 
@@ -125,6 +129,8 @@ async fn process_file(
         .lock()
         .await
         .insert(webpath.clone(), Arc::new(Mutex::new(())));
+
+    let mut success = true;
 
     let path = dir.join(file_str);
     match fs::read_to_string(path.clone()) {
@@ -138,12 +144,15 @@ async fn process_file(
         }
         Err(err) => {
             log::error!("Error occured reading file {}: {}", path.to_str().unwrap(), err);
+            success = false;
         }
     }
 
     processing.lock().await.remove(&webpath);
 
-    log::info!("Processed file {}", webpath);
+    log::debug!("Processed file {}", webpath);
+
+    return success;
 }
 
 async fn sort_files(files: Arc<Mutex<Vec<String>>>) {
@@ -168,19 +177,18 @@ pub async fn builder(
     mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
 ) {
     let rt  = tokio::runtime::Runtime::new().unwrap();
-    let local = task::LocalSet::new();
 
     let path = Path::new(&path_str);
 
     if !path.exists() {
         log::error!("Directory {} does not exist", &path_str);
-        local.block_on(&rt, tx.send(MsgSrv::Exit())).unwrap();
+        tx.send(MsgSrv::Exit()).await.unwrap();
         return;
     }
 
     if !path.is_dir() {
         log::error!("Path {} is not a directory", &path_str);
-        local.block_on(&rt, tx.send(MsgSrv::Exit())).unwrap();
+        tx.send(MsgSrv::Exit()).await.unwrap();
         return;
     }
 
@@ -198,7 +206,7 @@ pub async fn builder(
 
     let files_to_build = {
         let path_str = path_str.clone();
-        async { broad_file_search(path_str) }
+        broad_file_search(path_str)
     };
 
     log::debug!("Starting file builder");
@@ -222,7 +230,6 @@ pub async fn builder(
 
                         let files = files.lock().await.clone().into_iter().collect();
 
-                        log::info!("{:?}", map.lock().await.values());
                         if let Some(content) = map.lock().await.get(&path) {
                             result
                                 .send((Some(content.clone()), files))
@@ -258,7 +265,12 @@ pub async fn builder(
 
                 match msg {
                     MsgInternalBuilder::FileModified(file) => {
-                        process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await;
+                        if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
+                            let webpath = format!("/{}", file);
+                            log::debug!("Sending processed file {} to server", webpath);
+                            let content = map.lock().await.get(&webpath).unwrap().clone();
+                            tx.send(MsgSrv::File(webpath, content)).await.unwrap();
+                        }
                     }
                     MsgInternalBuilder::FileDeleted(file) => {
                     }
@@ -269,8 +281,6 @@ pub async fn builder(
             }
         });
     }
-
-    let mut files_to_build = files_to_build.await;
 
     {
         let path_str = path_str.clone();

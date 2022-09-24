@@ -97,10 +97,14 @@ async fn main() {
         args.port
     );
 
-    builder::builder(tx, args.directory, rx_file).await;
+    task::spawn(async move {
+        builder::builder(tx, args.directory, rx_file).await;
+    });
+
+    log::debug!("Server is now ready");
 
     while let Some(msg) = rx.recv().await {
-        log::debug!("{:?}", msg);
+        log::debug!("General server event: {:?}", msg);
 
         match msg {
             MsgSrv::File(path, content) => {
