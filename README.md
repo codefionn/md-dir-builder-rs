@@ -2,7 +2,7 @@
 
 A markdown directory server for a cool editing experience with any editor.
 
-This project also shows how to implement corrurent systems in Rust (with ``tokio``).
+This project also shows how to implement concurrent systems in Rust (with ``tokio``).
 
 ## Clone & run
 
