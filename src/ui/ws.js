@@ -8,7 +8,12 @@ socket.onmessage = function(event) {
 
   switch (data.action) {
   case "update-content":
-    comp_content.innerHTML = data.content;
+    const current_path = document.location.pathname.split("/")
+                             .map(part => decodeURI(part))
+                             .join("/");
+    if (current_path === data.path) {
+      comp_content.innerHTML = data.content;
+    }
     break;
   }
 };
