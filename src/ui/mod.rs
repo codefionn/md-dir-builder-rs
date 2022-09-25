@@ -155,7 +155,7 @@ pub fn render_contents<'a>(contents: Contents<'a>) -> Markup {
         main {
             @match contents {
                 Contents::Html(html_contents) => (PreEscaped(html_contents)),
-                Contents::Text(text) =>  (text),
+                Contents::Text(text) =>  pre { (text) },
                 Contents::NotFound() => "404 - Not found"
             }
     }
@@ -176,6 +176,11 @@ fn render_body<'a>(contents: Contents<'a>, files: &[String]) -> Markup {
         }
         div id="contents" {
             (render_contents(contents))
+        }
+        a href="/.license" title="License" {
+            div id="info" {
+                (md_icons::filled::maud_icon_info())
+            }
         }
     }
 }

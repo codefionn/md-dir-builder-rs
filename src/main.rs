@@ -142,10 +142,7 @@ async fn main() {
                 msg1.unwrap();
             }
             MsgSrv::Exit() => {
-                let (msg0, msg1) = tokio::join!(
-                    tx4.send(MsgSrv::Exit()),
-                    tx6.send(MsgSrv::Exit())
-                );
+                let (msg0, msg1) = tokio::join!(tx4.send(MsgSrv::Exit()), tx6.send(MsgSrv::Exit()));
 
                 // ignore errors
                 msg0.ok();

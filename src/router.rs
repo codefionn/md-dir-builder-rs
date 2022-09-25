@@ -14,19 +14,26 @@
  *
  *  You should have received a copy of the GNU General Public License
  */
-use std::{sync::Arc, collections::HashMap};
+use std::{collections::HashMap, sync::Arc};
 
 use ahash::RandomState;
-use futures::{StreamExt, stream::SplitSink, SinkExt};
-use tokio::{sync::{self, Mutex}, task};
 use chrono::prelude::*;
+use futures::{stream::SplitSink, SinkExt, StreamExt};
+use tokio::{
+    sync::{self, Mutex},
+    task,
+};
 
 use axum::{
     body::{Bytes, Full},
+    extract::{
+        ws::{Message, WebSocket},
+        WebSocketUpgrade,
+    },
     http::{StatusCode, Uri},
-    response::{IntoResponse, Html, Response},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
-    Json, Router, extract::{WebSocketUpgrade, ws::{WebSocket, Message}}, Extension
+    Extension, Json, Router,
 };
 
 use serde::{Deserialize, Serialize};
@@ -61,29 +68,60 @@ macro_rules! get_resource_generator {
     };
 }
 
+macro_rules! get_full_text_page {
+    ($path:literal, $tx_file:ident) => {
+        {
+            let tx_file = $tx_file.clone();
+
+            get(|| async move {
+                let (tx_onefile, rx_onefile) = sync::oneshot::channel();
+
+                tx_file
+                    .clone()
+                    .send(MsgBuilder::AllFiles(tx_onefile))
+                    .await
+                    .unwrap_or_else(|_| panic!("Failed awaiting result"));
+
+                if let Ok(all_files) = rx_onefile.await {
+                    let result = crate::ui::render_page("License", crate::ui::Contents::Text(include_str!($path)), &all_files[..]);
+                    (StatusCode::OK, Html(format!("{}", result.into_string())))
+                } else {
+                    (StatusCode::GONE, Html(format!("Internal server error")))
+                }
+            })
+        }
+    }
+}
+
 get_resource_generator!(ws_js_file, "application/javascript", "./ui/ws.js");
 
 #[derive(Clone)]
 struct WsState {
-    pub ws_channels: Arc<Mutex<HashMap<i64, sync::mpsc::Sender<MsgSrv>, RandomState>>> 
+    pub ws_channels: Arc<Mutex<HashMap<i64, sync::mpsc::Sender<MsgSrv>, RandomState>>>,
 }
 
 fn determine_real_path(path: &str) -> String {
-    return format!("/{}", path.split('/').map(|part| urlencoding::decode(part).unwrap().to_string()).fold(String::new(), |a, b| {
-        if a.is_empty() {
-            b
-        } else {
-            format!("{}/{}", a, b)
-        }
-    }));
+    return format!(
+        "/{}",
+        path.split('/')
+            .map(|part| urlencoding::decode(part).unwrap().to_string())
+            .fold(String::new(), |a, b| {
+                if a.is_empty() {
+                    b
+                } else {
+                    format!("{}/{}", a, b)
+                }
+            })
+    );
 }
 
 pub async fn create_router(
     tx_file: sync::mpsc::Sender<MsgBuilder>,
 ) -> (Router, tokio::sync::mpsc::Sender<MsgSrv>) {
     let (tx, mut rx) = sync::mpsc::channel(128);
-    let ws_channels: Arc<Mutex<HashMap<i64, sync::mpsc::Sender<MsgSrv>, RandomState>>> 
-        = Arc::new(Mutex::new(HashMap::with_capacity_and_hasher(4, RandomState::new())));
+    let ws_channels: Arc<Mutex<HashMap<i64, sync::mpsc::Sender<MsgSrv>, RandomState>>> = Arc::new(
+        Mutex::new(HashMap::with_capacity_and_hasher(4, RandomState::new())),
+    );
 
     let ws_channels_for_listener = ws_channels.clone();
     task::spawn(async move {
@@ -95,14 +133,20 @@ pub async fn create_router(
                     let ws_channels = ws_channels_for_listener.lock().await;
                     log::debug!("Open websockets: {}", ws_channels.len());
                     for tx_ws in ws_channels.values() {
-                        tx_ws.send(MsgSrv::File(path.clone(), content.clone())).await.unwrap();
+                        tx_ws
+                            .send(MsgSrv::File(path.clone(), content.clone()))
+                            .await
+                            .unwrap();
                     }
                 }
                 MsgSrv::NewFile(path, all_files) => {
                     let ws_channels = ws_channels_for_listener.lock().await;
                     log::debug!("Open websockets: {}", ws_channels.len());
                     for tx_ws in ws_channels.values() {
-                        tx_ws.send(MsgSrv::NewFile(path.clone(), all_files.clone())).await.unwrap();
+                        tx_ws
+                            .send(MsgSrv::NewFile(path.clone(), all_files.clone()))
+                            .await
+                            .unwrap();
                     }
                 }
                 MsgSrv::Exit() => {
@@ -116,9 +160,12 @@ pub async fn create_router(
         //.route("/.rsc/Roboto/Roboto-Regular.ttf", get(rsc_roboto_regular))
         .route("/.rsc/ws.js", get(ws_js_file))
         .route("/.ws", get(handle_ws))
-        .layer(Extension (WsState { ws_channels: ws_channels.clone() }))
+        .layer(Extension(WsState {
+            ws_channels: ws_channels.clone(),
+        }))
         .route("/.ping", get(ping))
         .route("/.api", post(|| async {}))
+        .route("/.license", get_full_text_page!("../LICENSE", tx_file))
         .route("/.contents/*rest", {
             let tx_file = tx_file.clone();
             get(|uri: Uri| async move {
@@ -132,17 +179,27 @@ pub async fn create_router(
                     .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
                     .await
                     .unwrap_or_else(|_| panic!("Failed awaiting result"));
-    
+
                 if let Ok(result) = rx_onefile.await {
                     match result {
                         (Some(result), files) => {
-                            let result = format!("{}", crate::ui::render_contents(crate::ui::Contents::Html(result.as_str())).into_string());
-    
+                            let result = format!(
+                                "{}",
+                                crate::ui::render_contents(crate::ui::Contents::Html(
+                                    result.as_str()
+                                ))
+                                .into_string()
+                            );
+
                             (StatusCode::OK, Html(result))
-                        },
+                        }
                         (None, files) => {
-                            let result = format!("{}", crate::ui::render_contents(crate::ui::Contents::NotFound()).into_string());
-    
+                            let result = format!(
+                                "{}",
+                                crate::ui::render_contents(crate::ui::Contents::NotFound())
+                                    .into_string()
+                            );
+
                             (StatusCode::NOT_FOUND, Html(result))
                         }
                     }
@@ -162,17 +219,33 @@ pub async fn create_router(
                 .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
                 .await
                 .unwrap_or_else(|_| panic!("Failed awaiting result"));
-    
+
             if let Ok(result) = rx_onefile.await {
                 match result {
                     (Some(result), files) => {
-                        let result = format!("{}", crate::ui::render_page(requested_file.as_str(), crate::ui::Contents::Html(result.as_str()), &files[..]).into_string());
-    
+                        let result = format!(
+                            "{}",
+                            crate::ui::render_page(
+                                requested_file.as_str(),
+                                crate::ui::Contents::Html(result.as_str()),
+                                &files[..]
+                            )
+                            .into_string()
+                        );
+
                         (StatusCode::OK, Html(result))
-                    },
+                    }
                     (None, files) => {
-                        let result = format!("{}", crate::ui::render_page(requested_file.as_str(), crate::ui::Contents::NotFound(), &files[..]).into_string());
-    
+                        let result = format!(
+                            "{}",
+                            crate::ui::render_page(
+                                requested_file.as_str(),
+                                crate::ui::Contents::NotFound(),
+                                &files[..]
+                            )
+                            .into_string()
+                        );
+
                         (StatusCode::NOT_FOUND, Html(result))
                     }
                 }
@@ -198,15 +271,20 @@ async fn handle_ws_socket(mut socket: WebSocket, state: WsState) {
     task::spawn(async move {
         while let Some(msg) = rx_ws.recv().await {
             log::debug!("WebSocket Channel received: {:?}", msg);
-        
+
             match msg {
                 MsgSrv::File(path, content) => {
                     // Send the client update of the content
-                    if let Err(err) = send_msg(&mut sender, json::object! {
-                        action: "update-content",
-                        path: path,
-                        content: content
-                    }).await {
+                    if let Err(err) = send_msg(
+                        &mut sender,
+                        json::object! {
+                            action: "update-content",
+                            path: path,
+                            content: content
+                        },
+                    )
+                    .await
+                    {
                         log::error!("Web socket connection broke: {}", err);
                         break;
                     }
@@ -214,10 +292,15 @@ async fn handle_ws_socket(mut socket: WebSocket, state: WsState) {
                 MsgSrv::NewFile(_, all_files) => {
                     let content = crate::ui::render_sidebar(&all_files[..]);
                     // Send the client update of the sidebar
-                    if let Err(err) = send_msg(&mut sender, json::object! {
-                        action: "update-sidebar",
-                        content: content.into_string()
-                    }).await {
+                    if let Err(err) = send_msg(
+                        &mut sender,
+                        json::object! {
+                            action: "update-sidebar",
+                            content: content.into_string()
+                        },
+                    )
+                    .await
+                    {
                         log::error!("Web socket connection broke: {}", err);
                         break;
                     }
@@ -236,7 +319,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: WsState) {
         let mut ws_channels = state.ws_channels.lock().await;
         ws_channels.insert(id, tx_ws.clone());
     }
-    
+
     while let Some(msg) = receiver.next().await {
         let msg = if let Ok(msg) = msg {
             msg
@@ -252,7 +335,10 @@ async fn handle_ws_socket(mut socket: WebSocket, state: WsState) {
     log::debug!("Closed websocket connection");
 }
 
-async fn send_msg(sender: &mut SplitSink<WebSocket, Message>, val: json::JsonValue) -> anyhow::Result<()> {
+async fn send_msg(
+    sender: &mut SplitSink<WebSocket, Message>,
+    val: json::JsonValue,
+) -> anyhow::Result<()> {
     sender.send(Message::Text(val.dump())).await?;
 
     Ok(())

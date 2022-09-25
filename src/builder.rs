@@ -16,14 +16,15 @@
  */
 use crate::markdown::MarkdownParser;
 use crate::msg::MsgBuilder;
-use ahash::RandomState;
-use std::{collections::HashMap, path::Path, sync::Arc, cmp::Ordering};
-use tokio::{
-    sync::{self, Mutex},
-    task, runtime::Builder,
-};
-use serde::Deserialize;
 use crate::msg::MsgInternalBuilder;
+use ahash::RandomState;
+use serde::Deserialize;
+use std::{cmp::Ordering, collections::HashMap, path::Path, sync::Arc};
+use tokio::{
+    runtime::Builder,
+    sync::{self, Mutex},
+    task,
+};
 
 #[cfg(watchman)]
 use watchman_client::prelude::*;
@@ -40,33 +41,35 @@ fn broad_dir_search(path_str: &String) -> Box<Vec<String>> {
     let path = Path::new(&path_str);
     if let Ok(files) = path.read_dir() {
         files
-            .map(|entry| {
-                match entry {
-                    Ok(entry) => {
-                        let file_name = std::rc::Rc::new(entry.file_name().into_string().unwrap());
-                        if entry.path().is_dir() {
-                            if IGNORE_DIRS.contains(&file_name.as_str()) {
-                                Box::new(vec![])
-                            } else {
-                                let file_name_iter = [file_name.to_string()];
-                                let newdir = format!("{}/{}", &path_str_clone, file_name);
-                                Box::new(broad_dir_search(&newdir).iter().map(|path| {
-                                    format!("{}/{}", file_name, path)
-                                }).chain(file_name_iter).collect())
-                            }
-                        } else {
+            .map(|entry| match entry {
+                Ok(entry) => {
+                    let file_name = std::rc::Rc::new(entry.file_name().into_string().unwrap());
+                    if entry.path().is_dir() {
+                        if IGNORE_DIRS.contains(&file_name.as_str()) {
                             Box::new(vec![])
+                        } else {
+                            let file_name_iter = [file_name.to_string()];
+                            let newdir = format!("{}/{}", &path_str_clone, file_name);
+                            Box::new(
+                                broad_dir_search(&newdir)
+                                    .iter()
+                                    .map(|path| format!("{}/{}", file_name, path))
+                                    .chain(file_name_iter)
+                                    .collect(),
+                            )
                         }
-                    }
-                    Err(err) => {
-                        log::error!(
-                            "Error in directory {} reading an entry: {}",
-                            path_str_clone,
-                            err
-                        );
-
+                    } else {
                         Box::new(vec![])
                     }
+                }
+                Err(err) => {
+                    log::error!(
+                        "Error in directory {} reading an entry: {}",
+                        path_str_clone,
+                        err
+                    );
+
+                    Box::new(vec![])
                 }
             })
             .fold(Box::new(vec![]), |mut x, mut y| {
@@ -85,35 +88,34 @@ fn broad_file_search(path_str: String) -> Vec<String> {
     let path = Path::new(&path_str);
     if let Ok(files) = path.read_dir() {
         files
-            .map(|entry| {
-                match entry {
-                    Ok(entry) => {
-                        let file_name = std::rc::Rc::new(entry.file_name().into_string().unwrap());
-                        if entry.path().is_dir() {
-                            if IGNORE_DIRS.contains(&file_name.as_str()) {
-                                vec![]
-                            } else {
-                                let newdir = format!("{}/{}", &path_str_clone, file_name);
-                                broad_file_search(newdir).iter().map(|path| {
-                                    format!("{}/{}", file_name, path)
-                                }).collect()
-                            }
+            .map(|entry| match entry {
+                Ok(entry) => {
+                    let file_name = std::rc::Rc::new(entry.file_name().into_string().unwrap());
+                    if entry.path().is_dir() {
+                        if IGNORE_DIRS.contains(&file_name.as_str()) {
+                            vec![]
                         } else {
-                            if file_name.ends_with(".md") {
-                                vec![format!("{}", file_name)]
-                            } else {
-                                vec![]
-                            }
+                            let newdir = format!("{}/{}", &path_str_clone, file_name);
+                            broad_file_search(newdir)
+                                .iter()
+                                .map(|path| format!("{}/{}", file_name, path))
+                                .collect()
+                        }
+                    } else {
+                        if file_name.ends_with(".md") {
+                            vec![format!("{}", file_name)]
+                        } else {
+                            vec![]
                         }
                     }
-                    Err(err) => {
-                        log::error!(
-                            "Error in directory {} reading an entry: {}",
-                            path_str_clone,
-                            err
-                        );
-                        vec![]
-                    }
+                }
+                Err(err) => {
+                    log::error!(
+                        "Error in directory {} reading an entry: {}",
+                        path_str_clone,
+                        err
+                    );
+                    vec![]
                 }
             })
             .flatten()
@@ -159,7 +161,11 @@ async fn process_file(
             }
         }
         Err(err) => {
-            log::error!("Error occured reading file {}: {}", path.to_str().unwrap(), err);
+            log::error!(
+                "Error occured reading file {}: {}",
+                path.to_str().unwrap(),
+                err
+            );
             success = false;
         }
     }
@@ -192,7 +198,7 @@ pub async fn builder(
     path_str: String,
     mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
 ) {
-    let rt  = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
     let path = Path::new(&path_str);
 
@@ -212,9 +218,7 @@ pub async fn builder(
         HashMap::with_capacity_and_hasher(128, RandomState::new()),
     ));
 
-    let files: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(
-        Vec::with_capacity(128)
-    ));
+    let files: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::with_capacity(128)));
 
     let processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>> = Arc::new(
         Mutex::new(HashMap::with_capacity_and_hasher(128, RandomState::new())),
@@ -285,23 +289,25 @@ pub async fn builder(
     log::debug!("Exited builder files");
 }
 
-async fn server_queries(mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
-                        processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
-                        map: Arc<Mutex<HashMap<String, String, RandomState>>>,
-                        files: Arc<Mutex<Vec<String>>>) {
+async fn server_queries(
+    mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
+    processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+    files: Arc<Mutex<Vec<String>>>,
+) {
     log::debug!("Started file reader");
-    
+
     while let Some(msg) = rx_file.recv().await {
         log::debug!("File reader event: {:?}", msg);
-    
+
         match msg {
             MsgBuilder::File(path, result) => {
                 if let Some(lock) = processing.lock().await.get(&path) {
                     let _ = lock.lock().await; // Wait for processing to finish
                 }
-    
+
                 let files = files.lock().await.clone().into_iter().collect();
-    
+
                 if let Some(content) = map.lock().await.get(&path) {
                     result
                         .send((Some(content.clone()), files))
@@ -312,47 +318,63 @@ async fn server_queries(mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
                         .unwrap_or_else(|err| log::error!("{:?}", err));
                 }
             }
+            MsgBuilder::AllFiles(result) => {
+                let files = files.lock().await.clone().into_iter().collect();
+                result
+                    .send(files)
+                    .unwrap_or_else(|err| log::error!("{:?}", err));
+            }
             MsgBuilder::Exit() => {
                 break;
             }
         }
     }
-    
+
     log::debug!("Exited file communication");
 }
 
-async fn file_builder(mut rx_builder: sync::mpsc::Receiver<MsgInternalBuilder>,
-                      tx_srv: sync::mpsc::Sender<MsgSrv>,
-                      path_str: String,
-                      processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
-                      map: Arc<Mutex<HashMap<String, String, RandomState>>>,
-                      files: Arc<Mutex<Vec<String>>>) {
+async fn file_builder(
+    mut rx_builder: sync::mpsc::Receiver<MsgInternalBuilder>,
+    tx_srv: sync::mpsc::Sender<MsgSrv>,
+    path_str: String,
+    processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+    files: Arc<Mutex<Vec<String>>>,
+) {
     log::debug!("Started file builder listener");
     let path = Path::new(&path_str);
-    
+
     while let Some(msg) = rx_builder.recv().await {
         log::debug!("File builder event: {:?}", msg);
-    
+
         match msg {
             MsgInternalBuilder::FileCreated(file) => {
-                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
+                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await
+                {
                     let webpath = format!("/{}", file);
-                    log::debug!("Sending processed file {} to server (is_new: {})", webpath, true);
+                    log::debug!(
+                        "Sending processed file {} to server (is_new: {})",
+                        webpath,
+                        true
+                    );
                     let content = map.lock().await.get(&webpath).unwrap().clone();
                     sort_files(files.clone()).await;
-                    tx_srv.send(MsgSrv::NewFile(webpath, files.lock().await.clone())).await.unwrap();
+                    tx_srv
+                        .send(MsgSrv::NewFile(webpath, files.lock().await.clone()))
+                        .await
+                        .unwrap();
                 }
             }
             MsgInternalBuilder::FileModified(file) => {
-                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
+                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await
+                {
                     let webpath = format!("/{}", file);
                     log::debug!("Sending processed file {} to server", webpath);
                     let content = map.lock().await.get(&webpath).unwrap().clone();
                     tx_srv.send(MsgSrv::File(webpath, content)).await.unwrap();
                 }
             }
-            MsgInternalBuilder::FileDeleted(file) => {
-            }
+            MsgInternalBuilder::FileDeleted(file) => {}
             MsgInternalBuilder::Exit() => {
                 break;
             }
@@ -362,11 +384,13 @@ async fn file_builder(mut rx_builder: sync::mpsc::Receiver<MsgInternalBuilder>,
     log::debug!("Exited file builder listener");
 }
 
-async fn initial_build(files_to_build: Vec<String>,
-                       path_str: String,
-                       processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
-                       map: Arc<Mutex<HashMap<String, String, RandomState>>>,
-                       files: Arc<Mutex<Vec<String>>>) {
+async fn initial_build(
+    files_to_build: Vec<String>,
+    path_str: String,
+    processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+    files: Arc<Mutex<Vec<String>>>,
+) {
     for file in files_to_build {
         let map = map.clone();
         let processing = processing.clone();
@@ -374,43 +398,48 @@ async fn initial_build(files_to_build: Vec<String>,
         let path = Path::new(&path_str);
         process_file(path, &file, map, files, processing).await;
     }
-    
+
     sort_files(files).await;
 }
 
 #[cfg(not(notify))]
 #[cfg(not(watcherman))]
-async fn watch_inotify(tx_builder: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path, path_str: &String) -> anyhow::Result<()> {
-    use inotify::{
-        EventMask,
-        WatchMask,
-        Inotify,
-    };
+async fn watch_inotify(
+    tx_builder: sync::mpsc::Sender<MsgInternalBuilder>,
+    path: &Path,
+    path_str: &String,
+) -> anyhow::Result<()> {
+    use inotify::{EventMask, Inotify, WatchMask};
 
     let mut inotify = Inotify::init()?;
 
     let mut wd_to_dir = HashMap::new();
 
-    wd_to_dir.insert(inotify.add_watch(
-        path,
-        WatchMask::MODIFY | WatchMask::CREATE | WatchMask::DELETE,
-    )?, String::new());
+    wd_to_dir.insert(
+        inotify.add_watch(
+            path,
+            WatchMask::MODIFY | WatchMask::CREATE | WatchMask::DELETE,
+        )?,
+        String::new(),
+    );
 
     let dirs = broad_dir_search(path_str);
     for dir in dirs.iter() {
         let dir_path = path.join(dir);
-        wd_to_dir.insert(inotify.add_watch(
-            dir_path,
-            WatchMask::MODIFY | WatchMask::CREATE | WatchMask::DELETE,
-        )?, dir.to_string());
+        wd_to_dir.insert(
+            inotify.add_watch(
+                dir_path,
+                WatchMask::MODIFY | WatchMask::CREATE | WatchMask::DELETE,
+            )?,
+            dir.to_string(),
+        );
     }
 
     log::debug!("Watching current directory for activity...");
 
     let mut buffer = [0u8; 4096];
     loop {
-        let events = inotify
-            .read_events_blocking(&mut buffer)?;
+        let events = inotify.read_events_blocking(&mut buffer)?;
 
         let is_markdown = regex::Regex::new(r"\.md$").unwrap();
 
@@ -427,21 +456,30 @@ async fn watch_inotify(tx_builder: sync::mpsc::Sender<MsgInternalBuilder>, path:
                         log::debug!("Directory created: {}/{:?}", dir, event.name);
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File created: {}/{:?}", dir, event.name);
-                        tx_builder.send(MsgInternalBuilder::FileCreated(file)).await.unwrap();
+                        tx_builder
+                            .send(MsgInternalBuilder::FileCreated(file))
+                            .await
+                            .unwrap();
                     }
                 } else if event.mask.contains(EventMask::DELETE) {
                     if event.mask.contains(EventMask::ISDIR) {
                         log::debug!("Directory deleted: {}/{:?}", dir, event.name);
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File deleted: {}", file);
-                        tx_builder.send(MsgInternalBuilder::FileDeleted(file)).await.unwrap();
+                        tx_builder
+                            .send(MsgInternalBuilder::FileDeleted(file))
+                            .await
+                            .unwrap();
                     }
                 } else if event.mask.contains(EventMask::MODIFY) {
                     if event.mask.contains(EventMask::ISDIR) {
                         log::debug!("Directory modified: {}/{:?}", dir, event.name);
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File modified: {}", file);
-                        tx_builder.send(MsgInternalBuilder::FileModified(file)).await.unwrap();
+                        tx_builder
+                            .send(MsgInternalBuilder::FileModified(file))
+                            .await
+                            .unwrap();
                     }
                 }
             }
@@ -451,10 +489,14 @@ async fn watch_inotify(tx_builder: sync::mpsc::Sender<MsgInternalBuilder>, path:
 
 #[cfg(notify)]
 #[cfg(not(watchman))]
-async fn watcher_notify(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path, path_str: &String) -> anyhow::Result<()> {
+async fn watcher_notify(
+    tx: sync::mpsc::Sender<MsgInternalBuilder>,
+    path: &Path,
+    path_str: &String,
+) -> anyhow::Result<()> {
     let real_path = match path.canonicalize() {
         Ok(real_path) => real_path.to_string_lossy().to_string(),
-        _ => path_str.clone()
+        _ => path_str.clone(),
     };
     log::debug!("Started watcher notify in {}", real_path);
 
@@ -462,9 +504,12 @@ async fn watcher_notify(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path,
 
     let (tx, mut rx) = sync::mpsc::channel(128);
 
-    let mut watcher = RecommendedWatcher::new(move |res| {
-        tx.send(res);
-    }, Config::default())?;
+    let mut watcher = RecommendedWatcher::new(
+        move |res| {
+            tx.send(res);
+        },
+        Config::default(),
+    )?;
 
     watcher.watch(path.as_ref(), RecursiveMode::Recursive)?;
 
@@ -486,7 +531,11 @@ query_result_type! {
 }
 
 #[cfg(watchman)]
-async fn watcher_watchman(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path, path_str: &String) -> anyhow::Result<()> {
+async fn watcher_watchman(
+    tx: sync::mpsc::Sender<MsgInternalBuilder>,
+    path: &Path,
+    path_str: &String,
+) -> anyhow::Result<()> {
     let client = Connector::new().connect().await?;
     let path = CanonicalPath::canonicalize(&path)?;
     let resolved_root = client.resolve_root(path).await?;
@@ -513,8 +562,12 @@ async fn watcher_watchman(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Pat
         )
         .await?;
 
-    log::debug!("Started watch files at {} with watchman v{}", path_str, response.version);
-    
+    log::debug!(
+        "Started watch files at {} with watchman v{}",
+        path_str,
+        response.version
+    );
+
     while let Ok(data) = subscription.next().await {
         log::debug!("{:?}", data);
 
@@ -523,8 +576,7 @@ async fn watcher_watchman(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Pat
             SubscriptionData::FilesChanged(result) => {
                 log::debug!("Files changed: {:?}", result.files);
             }
-            _ => {
-            }
+            _ => {}
         }
     }
 

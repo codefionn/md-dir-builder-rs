@@ -32,6 +32,9 @@ pub enum MsgBuilder {
         /* path: */ String,
         /* result: */ sync::oneshot::Sender<(Option<String>, /* all_files: */ Vec<String>)>,
     ),
+    AllFiles(
+        /* result: */ sync::oneshot::Sender</* all_files: */ Vec<String>>,
+    ),
     Exit(),
 }
 
