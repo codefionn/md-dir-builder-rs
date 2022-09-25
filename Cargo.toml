@@ -29,6 +29,7 @@ watchman_client = { version = "0.8", optional = true }
 md-icons = { version = "0.2.2", features = [ "maud" ] }
 bytes = "1.2.1"
 chrono = "0.4.22"
+urlencoding = "2.1.2"
 
 [features]
 watchman = [ "watchman_client" ]

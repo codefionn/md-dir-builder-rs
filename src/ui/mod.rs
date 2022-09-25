@@ -42,7 +42,13 @@ fn determine_visible_file<'a>(file: &'a Vec<&str>, depth: usize) -> &'a [&'a str
 fn render_sidebar_file(file: &Vec<&str>, depth: usize) -> Markup {
     let visible_file = determine_visible_file(file, depth);
     let visible_file = visible_file.join("/");
-    let href = format!("/{}", file.join("/"));
+    let href = format!(
+        "/{}",
+        file.iter()
+            .map(|part| urlencoding::encode(part).to_string())
+            .collect::<Vec<String>>()
+            .join("/")
+    );
     html! {
         div class="file" {
             a href=(href) {

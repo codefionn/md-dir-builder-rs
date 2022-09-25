@@ -103,22 +103,32 @@ pub async fn create_router(
         .route("/.ping", get(ping))
         .route("/.api", post(|| async {}))
         .fallback(get(|uri: Uri| async move {
+            let requested_file = uri.path().to_string();
+            let requested_file = format!("/{}", requested_file.split('/').map(|part| urlencoding::decode(part).unwrap().to_string()).fold(String::new(), |a, b| {
+                if a.is_empty() {
+                    b
+                } else {
+                    format!("{}/{}", a, b)
+                }
+            }));
+
+            log::debug!("Requested file: {}", requested_file);
             let (tx_onefile, rx_onefile) = sync::oneshot::channel();
             tx_file
                 .clone()
-                .send(MsgBuilder::File(uri.path().to_string(), tx_onefile))
+                .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
                 .await
                 .unwrap_or_else(|_| panic!("Failed awaiting result"));
     
             if let Ok(result) = rx_onefile.await {
                 match result {
                     (Some(result), files) => {
-                        let result = format!("{}", crate::ui::render_page(uri.path(), crate::ui::Contents::Html(result.as_str()), &files[..]).into_string());
+                        let result = format!("{}", crate::ui::render_page(requested_file.as_str(), crate::ui::Contents::Html(result.as_str()), &files[..]).into_string());
     
                         (StatusCode::OK, Html(result))
                     },
                     (None, files) => {
-                        let result = format!("{}", crate::ui::render_page(uri.path(), crate::ui::Contents::NotFound(), &files[..]).into_string());
+                        let result = format!("{}", crate::ui::render_page(requested_file.as_str(), crate::ui::Contents::NotFound(), &files[..]).into_string());
     
                         (StatusCode::NOT_FOUND, Html(result))
                     }
