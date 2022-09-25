@@ -35,7 +35,7 @@ function fetch_contents(pathname, successfn) {
 }
 
 window.onpopstate = (event) => {
-  const href = document.location.href;
+  const href = document.location.pathname;
   if (href.startsWith("/.")) {
   } else {
     fetch_contents(href);
