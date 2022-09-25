@@ -14,7 +14,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  */
-use std::cmp::Ordering;
+use std::{cmp::Ordering, env::current_exe};
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
@@ -33,24 +33,98 @@ fn render_head(title: &str) -> Markup {
     }
 }
 
-fn render_sidebar(files: &[String]) -> Markup {
-    let mut files: Vec<&String> = files.iter().collect();
-    files.sort_by(|&a, &b| -> Ordering {
-        //let cnt_dir_a = a.matches("/").count();
-        //let cnt_dir_b = b.matches("/").count();
+#[inline]
+fn determine_visible_file<'a>(file: &'a Vec<&str>, depth: usize) -> &'a [&'a str] {
+    &file[depth..]
+}
 
-        a.cmp(b)
-    });
-
+#[inline]
+fn render_sidebar_file(file: &Vec<&str>, depth: usize) -> Markup {
+    let visible_file = determine_visible_file(file, depth);
+    let visible_file = visible_file.join("/");
+    let href = format!("/{}", file.join("/"));
     html! {
-        @for file in files {
-            div id="file" {
-                a href=(file) {
-                    (file)
-                }
+        div class="file" {
+            a href=(href) {
+                (visible_file)
             }
         }
     }
+}
+
+/// Splits given files in their directory at depth, if they have an directory at the given depth.
+fn split_dirs<'a>(
+    files: &'a [&'a Vec<&'a str>],
+    depth: usize,
+) -> Vec<(&'a str, &'a [&'a Vec<&'a str>])> {
+    let mut dirs: Vec<(&str, &[&Vec<&str>])> = Vec::new();
+    let mut last_dir = None;
+    let mut start_index = 0;
+    let mut current_index = 0;
+    for &file in files {
+        let visible_file = determine_visible_file(file, depth);
+        if visible_file.len() > 1 {
+            // Path has at least one directory?
+            if last_dir.is_none() {
+                last_dir = Some(visible_file[0]);
+            } else if *last_dir.unwrap() != *visible_file[0] {
+                for file in &files[start_index..current_index] {
+                    assert_eq!(*last_dir.unwrap(), *file[depth]);
+                }
+                dirs.push((last_dir.unwrap(), &files[start_index..current_index]));
+                start_index = current_index;
+                last_dir = Some(visible_file[0]);
+            }
+        } else {
+            // No directory (anymore), start searching at next index and, if appropriate, push the
+            // last discovered directory to the result
+            if let Some(old_last_dir) = last_dir {
+                dirs.push((old_last_dir, &files[start_index..current_index]));
+                start_index = current_index + 1;
+                last_dir = None;
+            } else {
+                start_index = current_index + 1;
+            }
+        }
+
+        current_index += 1;
+    }
+
+    if let Some(last_dir) = last_dir {
+        dirs.push((last_dir, &files[start_index..current_index]));
+    }
+
+    return dirs;
+}
+
+#[inline]
+fn render_sidebar_dir(files: &[&Vec<&str>], depth: usize) -> Markup {
+    let dirs = split_dirs(files, depth);
+
+    let files: Vec<&Vec<&str>> = files
+        .iter()
+        .filter(|&f| f.len() == depth + 1)
+        .map(|&f| f)
+        .collect();
+
+    html! {
+        @for file in files {
+            (render_sidebar_file(file, depth))
+        }
+        @for (dir, dirs) in dirs {
+            div class="dir" {
+                div class="dir-name" {
+                    (format!("/{}", dir))
+                }
+
+                (render_sidebar_dir(&dirs[..], depth + 1))
+            }
+        }
+    }
+}
+
+fn render_sidebar(files: &[&Vec<&str>]) -> Markup {
+    render_sidebar_dir(files, 0)
 }
 
 /// Renders the page's main contents
@@ -74,9 +148,24 @@ pub enum Contents<'a> {
 
 /// Renders just the body
 fn render_body<'a>(contents: Contents<'a>, files: &[String]) -> Markup {
+    let mut files: Vec<&String> = files.iter().collect();
+    files.sort_by(|&a, &b| -> Ordering {
+        //let cnt_dir_a = a.matches("/").count();
+        //let cnt_dir_b = b.matches("/").count();
+
+        a.cmp(b)
+    });
+
+    let files: Vec<Vec<&str>> = files
+        .iter()
+        .map(|f| f.as_str())
+        .map(|f| f[1..].split('/').collect())
+        .collect();
+
+    let files: Vec<&Vec<&str>> = files.iter().collect();
     html! {
         nav id="sidebar" {
-            (render_sidebar(files))
+            (render_sidebar(&files[..]))
         }
         div id="contents" {
             (render_contents(contents))

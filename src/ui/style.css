@@ -31,6 +31,10 @@ body {
   font-size: 0.91em;
 }
 
+#sidebar .dir > .file, #sidebar .dir > .dir  {
+  margin-left: 5px;
+}
+
 #contents {
   flex-grow: 1;
   margin-left: 8px;
