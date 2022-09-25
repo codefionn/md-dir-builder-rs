@@ -280,12 +280,27 @@ pub async fn builder(
                 log::debug!("File builder event: {:?}", msg);
 
                 match msg {
-                    MsgInternalBuilder::FileModified(file) => {
+                    MsgInternalBuilder::FileCreated(file) => {
                         if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
                             let webpath = format!("/{}", file);
-                            log::debug!("Sending processed file {} to server", webpath);
+                            log::debug!("Sending processed file {} to server (is_new: {})", webpath, true);
                             let content = map.lock().await.get(&webpath).unwrap().clone();
-                            tx.send(MsgSrv::File(webpath, content)).await.unwrap();
+                            sort_files(files.clone()).await;
+                            tx.send(MsgSrv::NewFile(webpath, files.lock().await.clone())).await.unwrap();
+                        }
+                    }
+                    MsgInternalBuilder::FileModified(file) => {
+                        let is_file_new = files.lock().await.contains(&file);
+                        if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
+                            let webpath = format!("/{}", file);
+                            log::debug!("Sending processed file {} to server (is_new: {})", webpath, is_file_new);
+                            let content = map.lock().await.get(&webpath).unwrap().clone();
+                            if is_file_new {
+                                sort_files(files.clone()).await;
+                                tx.send(MsgSrv::NewFile(webpath, files.lock().await.clone())).await.unwrap();
+                            } else {
+                                tx.send(MsgSrv::File(webpath, content)).await.unwrap();
+                            }
                         }
                     }
                     MsgInternalBuilder::FileDeleted(file) => {
@@ -313,7 +328,7 @@ pub async fn builder(
                 process_file(path, &file, map, files, processing).await;
             }
 
-            sort_files(files_clone);
+            sort_files(files_clone).await;
         });
     }
 
@@ -386,6 +401,7 @@ async fn watch_inotify(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path, 
                         log::debug!("Directory created: {}/{:?}", dir, event.name);
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File created: {}/{:?}", dir, event.name);
+                        tx.send(MsgInternalBuilder::FileCreated(file)).await.unwrap();
                     }
                 } else if event.mask.contains(EventMask::DELETE) {
                     if event.mask.contains(EventMask::ISDIR) {

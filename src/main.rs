@@ -132,6 +132,15 @@ async fn main() {
                 msg0.unwrap();
                 msg1.unwrap();
             }
+            MsgSrv::NewFile(path, all_files) => {
+                let (msg0, msg1) = tokio::join!(
+                    tx4.send(MsgSrv::NewFile(path.clone(), all_files.clone())),
+                    tx6.send(MsgSrv::NewFile(path, all_files))
+                );
+
+                msg0.unwrap();
+                msg1.unwrap();
+            }
             MsgSrv::Exit() => exit(0),
         }
     }

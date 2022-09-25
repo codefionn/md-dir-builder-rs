@@ -129,8 +129,24 @@ fn render_sidebar_dir(files: &[&Vec<&str>], depth: usize) -> Markup {
     }
 }
 
-fn render_sidebar(files: &[&Vec<&str>]) -> Markup {
-    render_sidebar_dir(files, 0)
+pub fn render_sidebar(files: &[String]) -> Markup {
+    let mut files: Vec<&String> = files.iter().collect();
+    files.sort_by(|&a, &b| -> Ordering {
+        //let cnt_dir_a = a.matches("/").count();
+        //let cnt_dir_b = b.matches("/").count();
+
+        a.cmp(b)
+    });
+
+    let files: Vec<Vec<&str>> = files
+        .iter()
+        .map(|f| f.as_str())
+        .map(|f| f[1..].split('/').collect())
+        .collect();
+
+    let files: Vec<&Vec<&str>> = files.iter().collect();
+
+    render_sidebar_dir(&files[..], 0)
 }
 
 /// Renders the page's main contents
@@ -154,24 +170,9 @@ pub enum Contents<'a> {
 
 /// Renders just the body
 fn render_body<'a>(contents: Contents<'a>, files: &[String]) -> Markup {
-    let mut files: Vec<&String> = files.iter().collect();
-    files.sort_by(|&a, &b| -> Ordering {
-        //let cnt_dir_a = a.matches("/").count();
-        //let cnt_dir_b = b.matches("/").count();
-
-        a.cmp(b)
-    });
-
-    let files: Vec<Vec<&str>> = files
-        .iter()
-        .map(|f| f.as_str())
-        .map(|f| f[1..].split('/').collect())
-        .collect();
-
-    let files: Vec<&Vec<&str>> = files.iter().collect();
     html! {
         nav id="sidebar" {
-            (render_sidebar(&files[..]))
+            (render_sidebar(files))
         }
         div id="contents" {
             (render_contents(contents))

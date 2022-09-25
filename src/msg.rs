@@ -19,6 +19,7 @@ use tokio::sync;
 #[derive(PartialEq, Eq, Debug)]
 pub enum MsgSrv {
     File(/* path: */ String, /* content: */ String),
+    NewFile(/* path: */ String, /* all_files: */ Vec<String>),
     Exit(),
 }
 
@@ -33,7 +34,8 @@ pub enum MsgBuilder {
 
 #[derive(Debug)]
 pub enum MsgInternalBuilder {
+    FileCreated(/* path: */ String),
     FileModified(/* path: */ String),
-    FileDeleted(/* path */ String),
+    FileDeleted(/* path: */ String),
     Exit(),
 }

@@ -98,6 +98,13 @@ pub async fn create_router(
                         tx_ws.send(MsgSrv::File(path.clone(), content.clone())).await.unwrap();
                     }
                 }
+                MsgSrv::NewFile(path, all_files) => {
+                    let ws_channels = ws_channels_for_listener.lock().await;
+                    log::debug!("Open websockets: {}", ws_channels.len());
+                    for tx_ws in ws_channels.values() {
+                        tx_ws.send(MsgSrv::NewFile(path.clone(), all_files.clone())).await.unwrap();
+                    }
+                }
                 MsgSrv::Exit() => {
                     break;
                 }
@@ -199,6 +206,17 @@ async fn handle_ws_socket(mut socket: WebSocket, state: WsState) {
                         action: "update-content",
                         path: path,
                         content: content
+                    }).await {
+                        log::error!("Web socket connection broke: {}", err);
+                        break;
+                    }
+                }
+                MsgSrv::NewFile(_, all_files) => {
+                    let content = crate::ui::render_sidebar(&all_files[..]);
+                    // Send the client update of the sidebar
+                    if let Err(err) = send_msg(&mut sender, json::object! {
+                        action: "update-sidebar",
+                        content: content.into_string()
                     }).await {
                         log::error!("Web socket connection broke: {}", err);
                         break;

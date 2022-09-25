@@ -1,4 +1,5 @@
 const comp_content = document.body.querySelector("#contents");
+const comp_sidebar = document.body.querySelector("#sidebar");
 
 const wslink = "ws://" + document.location.host + "/.ws";
 const socket = new WebSocket(wslink);
@@ -14,6 +15,9 @@ socket.onmessage = function(event) {
     if (current_path === data.path) {
       comp_content.innerHTML = data.content;
     }
+    break;
+  case "update-sidebar":
+    comp_sidebar.innerHTML = data.content;
     break;
   }
 };
