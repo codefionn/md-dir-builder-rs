@@ -134,7 +134,7 @@ fn render_sidebar(files: &[&Vec<&str>]) -> Markup {
 }
 
 /// Renders the page's main contents
-fn render_contents<'a>(contents: Contents<'a>) -> Markup {
+pub fn render_contents<'a>(contents: Contents<'a>) -> Markup {
     html! {
         main {
             @match contents {

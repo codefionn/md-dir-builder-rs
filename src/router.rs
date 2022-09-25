@@ -68,6 +68,16 @@ struct WsState {
     pub ws_channels: Arc<Mutex<HashMap<i64, sync::mpsc::Sender<MsgSrv>, RandomState>>> 
 }
 
+fn determine_real_path(path: &str) -> String {
+    return format!("/{}", path.split('/').map(|part| urlencoding::decode(part).unwrap().to_string()).fold(String::new(), |a, b| {
+        if a.is_empty() {
+            b
+        } else {
+            format!("{}/{}", a, b)
+        }
+    }));
+}
+
 pub async fn create_router(
     tx_file: sync::mpsc::Sender<MsgBuilder>,
 ) -> (Router, tokio::sync::mpsc::Sender<MsgSrv>) {
@@ -102,15 +112,41 @@ pub async fn create_router(
         .layer(Extension (WsState { ws_channels: ws_channels.clone() }))
         .route("/.ping", get(ping))
         .route("/.api", post(|| async {}))
+        .route("/.contents/*rest", {
+            let tx_file = tx_file.clone();
+            get(|uri: Uri| async move {
+                let requested_file = uri.path()["/.contents".len()..].to_string();
+                let requested_file = determine_real_path(&requested_file);
+
+                log::debug!("Requested file contents: {}", requested_file);
+                let (tx_onefile, rx_onefile) = sync::oneshot::channel();
+                tx_file
+                    .clone()
+                    .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
+                    .await
+                    .unwrap_or_else(|_| panic!("Failed awaiting result"));
+    
+                if let Ok(result) = rx_onefile.await {
+                    match result {
+                        (Some(result), files) => {
+                            let result = format!("{}", crate::ui::render_contents(crate::ui::Contents::Html(result.as_str())).into_string());
+    
+                            (StatusCode::OK, Html(result))
+                        },
+                        (None, files) => {
+                            let result = format!("{}", crate::ui::render_contents(crate::ui::Contents::NotFound()).into_string());
+    
+                            (StatusCode::NOT_FOUND, Html(result))
+                        }
+                    }
+                } else {
+                    (StatusCode::GONE, Html(format!("Internal server error")))
+                }
+            })
+        })
         .fallback(get(|uri: Uri| async move {
             let requested_file = uri.path().to_string();
-            let requested_file = format!("/{}", requested_file.split('/').map(|part| urlencoding::decode(part).unwrap().to_string()).fold(String::new(), |a, b| {
-                if a.is_empty() {
-                    b
-                } else {
-                    format!("{}/{}", a, b)
-                }
-            }));
+            let requested_file = determine_real_path(&requested_file);
 
             log::debug!("Requested file: {}", requested_file);
             let (tx_onefile, rx_onefile) = sync::oneshot::channel();

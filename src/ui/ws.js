@@ -17,3 +17,15 @@ socket.onmessage = function(event) {
     break;
   }
 };
+
+const comp_files = document.body.querySelectorAll("#sidebar .file a");
+comp_files.forEach(
+    comp_file => {comp_file.addEventListener("click", event => {
+      event.preventDefault();
+
+      const url = new URL(comp_file.href);
+
+      fetch("/.contents" + url.pathname)
+          .then(response => response.text())
+          .then(contents => { comp_content.innerHTML = contents; });
+    })});
