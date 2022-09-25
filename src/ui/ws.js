@@ -22,14 +22,34 @@ socket.onmessage = function(event) {
   }
 };
 
+function fetch_contents(pathname, successfn) {
+  fetch("/.contents" + pathname)
+      .then(response => response.text())
+      .then(contents => {
+        comp_content.innerHTML = contents;
+
+        if (successfn) {
+          successfn();
+        }
+      });
+}
+
+window.onpopstate = (event) => {
+  const href = document.location.href;
+  if (href.startsWith("/.")) {
+  } else {
+    fetch_contents(href);
+  }
+};
+
 const comp_files = document.body.querySelectorAll("#sidebar .file a");
 comp_files.forEach(
-    comp_file => {comp_file.addEventListener("click", event => {
+    comp_file => {comp_file.addEventListener("click", (event) => {
       event.preventDefault();
 
       const url = new URL(comp_file.href);
 
-      fetch("/.contents" + url.pathname)
-          .then(response => response.text())
-          .then(contents => { comp_content.innerHTML = contents; });
+      fetch_contents(
+          url.pathname,
+          () => { history.pushState({}, url.pathname, url.pathname); });
     })});
