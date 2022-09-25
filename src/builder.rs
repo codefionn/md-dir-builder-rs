@@ -290,7 +290,7 @@ pub async fn builder(
                         }
                     }
                     MsgInternalBuilder::FileModified(file) => {
-                        let is_file_new = files.lock().await.contains(&file);
+                        let is_file_new = !files.lock().await.contains(&file);
                         if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
                             let webpath = format!("/{}", file);
                             log::debug!("Sending processed file {} to server (is_new: {})", webpath, is_file_new);
