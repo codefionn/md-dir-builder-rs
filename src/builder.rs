@@ -17,7 +17,7 @@
 use crate::markdown::MarkdownParser;
 use crate::msg::MsgBuilder;
 use ahash::RandomState;
-use std::{collections::{HashMap}, path::Path, sync::Arc, cmp::Ordering};
+use std::{collections::HashMap, path::Path, sync::Arc, cmp::Ordering};
 use tokio::{
     sync::{self, Mutex},
     task, runtime::Builder,
@@ -188,7 +188,7 @@ async fn sort_files(files: Arc<Mutex<Vec<String>>>) {
 ///
 /// This watches the given directory ``path_str`` and rebuilds new or modified files.
 pub async fn builder(
-    tx: sync::mpsc::Sender<MsgSrv>,
+    tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
     mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
 ) {
@@ -198,13 +198,13 @@ pub async fn builder(
 
     if !path.exists() {
         log::error!("Directory {} does not exist", &path_str);
-        tx.send(MsgSrv::Exit()).await.unwrap();
+        tx_srv.send(MsgSrv::Exit()).await.unwrap();
         return;
     }
 
     if !path.is_dir() {
         log::error!("Path {} is not a directory", &path_str);
-        tx.send(MsgSrv::Exit()).await.unwrap();
+        tx_srv.send(MsgSrv::Exit()).await.unwrap();
         return;
     }
 
@@ -227,45 +227,18 @@ pub async fn builder(
 
     log::debug!("Starting file builder");
 
+    // Listen to queries from the server
     {
         let map = map.clone();
         let processing = processing.clone();
         let files = files.clone();
 
         rt.spawn(async move {
-            log::debug!("Started file reader");
-
-            while let Some(msg) = rx_file.recv().await {
-                log::debug!("File reader event: {:?}", msg);
-
-                match msg {
-                    MsgBuilder::File(path, result) => {
-                        if let Some(lock) = processing.lock().await.get(&path) {
-                            let _ = lock.lock().await; // Wait for processing to finish
-                        }
-
-                        let files = files.lock().await.clone().into_iter().collect();
-
-                        if let Some(content) = map.lock().await.get(&path) {
-                            result
-                                .send((Some(content.clone()), files))
-                                .unwrap_or_else(|err| log::error!("{:?}", err));
-                        } else {
-                            result
-                                .send((None, files))
-                                .unwrap_or_else(|err| log::error!("{:?}", err));
-                        }
-                    }
-                    MsgBuilder::Exit() => {
-                        break;
-                    }
-                }
-            }
-
-            log::debug!("Exited file communication");
+            server_queries(rx_file, processing, map, files).await;
         });
     }
 
+    // Listen to file (created,modified,deleted) events and react accordingly
     let (tx_builder, mut rx_builder) = sync::mpsc::channel(128);
     {
         let path_str = path_str.clone();
@@ -274,61 +247,20 @@ pub async fn builder(
         let processing = processing.clone();
 
         rt.spawn(async move {
-            let path = Path::new(&path_str);
-
-            while let Some(msg) = rx_builder.recv().await {
-                log::debug!("File builder event: {:?}", msg);
-
-                match msg {
-                    MsgInternalBuilder::FileCreated(file) => {
-                        if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
-                            let webpath = format!("/{}", file);
-                            log::debug!("Sending processed file {} to server (is_new: {})", webpath, true);
-                            let content = map.lock().await.get(&webpath).unwrap().clone();
-                            sort_files(files.clone()).await;
-                            tx.send(MsgSrv::NewFile(webpath, files.lock().await.clone())).await.unwrap();
-                        }
-                    }
-                    MsgInternalBuilder::FileModified(file) => {
-                        let is_file_new = !files.lock().await.contains(&file);
-                        if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
-                            let webpath = format!("/{}", file);
-                            log::debug!("Sending processed file {} to server (is_new: {})", webpath, is_file_new);
-                            let content = map.lock().await.get(&webpath).unwrap().clone();
-                            if is_file_new {
-                                sort_files(files.clone()).await;
-                                tx.send(MsgSrv::NewFile(webpath, files.lock().await.clone())).await.unwrap();
-                            } else {
-                                tx.send(MsgSrv::File(webpath, content)).await.unwrap();
-                            }
-                        }
-                    }
-                    MsgInternalBuilder::FileDeleted(file) => {
-                    }
-                    MsgInternalBuilder::Exit() => {
-                        break;
-                    }
-                }
-            }
+            file_builder(rx_builder, tx_srv, path_str, processing, map, files).await;
         });
     }
 
+    // Initial build step: Builds all detected files
     {
         let path_str = path_str.clone();
         let map = map.clone();
         let processing = processing.clone();
         let files_clone = files.clone();
         let files = files.clone();
-        rt.spawn(async move {
-            for file in files_to_build {
-                let map = map.clone();
-                let processing = processing.clone();
-                let files = files.clone();
-                let path = Path::new(&path_str);
-                process_file(path, &file, map, files, processing).await;
-            }
 
-            sort_files(files_clone).await;
+        rt.spawn(async move {
+            initial_build(files_to_build, path_str, processing, map, files).await;
         });
     }
 
@@ -343,18 +275,112 @@ pub async fn builder(
         log::error!("An error occured watching files: {}", err);
     }
 
+    // Listen to file changes in the specified directory
     #[cfg(not(notify))]
     #[cfg(not(watchman))]
-    if let Err(err) = watch_inotify(tx_builder, &path, &path_str).await {
+    if let Err(err) = watch_inotify(tx_builder.clone(), &path, &path_str).await {
         log::error!("An error occured watching files: {}", err);
     }
 
     log::debug!("Exited builder files");
 }
 
+async fn server_queries(mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
+                        processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+                        map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+                        files: Arc<Mutex<Vec<String>>>) {
+    log::debug!("Started file reader");
+    
+    while let Some(msg) = rx_file.recv().await {
+        log::debug!("File reader event: {:?}", msg);
+    
+        match msg {
+            MsgBuilder::File(path, result) => {
+                if let Some(lock) = processing.lock().await.get(&path) {
+                    let _ = lock.lock().await; // Wait for processing to finish
+                }
+    
+                let files = files.lock().await.clone().into_iter().collect();
+    
+                if let Some(content) = map.lock().await.get(&path) {
+                    result
+                        .send((Some(content.clone()), files))
+                        .unwrap_or_else(|err| log::error!("{:?}", err));
+                } else {
+                    result
+                        .send((None, files))
+                        .unwrap_or_else(|err| log::error!("{:?}", err));
+                }
+            }
+            MsgBuilder::Exit() => {
+                break;
+            }
+        }
+    }
+    
+    log::debug!("Exited file communication");
+}
+
+async fn file_builder(mut rx_builder: sync::mpsc::Receiver<MsgInternalBuilder>,
+                      tx_srv: sync::mpsc::Sender<MsgSrv>,
+                      path_str: String,
+                      processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+                      map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+                      files: Arc<Mutex<Vec<String>>>) {
+    log::debug!("Started file builder listener");
+    let path = Path::new(&path_str);
+    
+    while let Some(msg) = rx_builder.recv().await {
+        log::debug!("File builder event: {:?}", msg);
+    
+        match msg {
+            MsgInternalBuilder::FileCreated(file) => {
+                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
+                    let webpath = format!("/{}", file);
+                    log::debug!("Sending processed file {} to server (is_new: {})", webpath, true);
+                    let content = map.lock().await.get(&webpath).unwrap().clone();
+                    sort_files(files.clone()).await;
+                    tx_srv.send(MsgSrv::NewFile(webpath, files.lock().await.clone())).await.unwrap();
+                }
+            }
+            MsgInternalBuilder::FileModified(file) => {
+                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await {
+                    let webpath = format!("/{}", file);
+                    log::debug!("Sending processed file {} to server", webpath);
+                    let content = map.lock().await.get(&webpath).unwrap().clone();
+                    tx_srv.send(MsgSrv::File(webpath, content)).await.unwrap();
+                }
+            }
+            MsgInternalBuilder::FileDeleted(file) => {
+            }
+            MsgInternalBuilder::Exit() => {
+                break;
+            }
+        }
+    }
+
+    log::debug!("Exited file builder listener");
+}
+
+async fn initial_build(files_to_build: Vec<String>,
+                       path_str: String,
+                       processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+                       map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+                       files: Arc<Mutex<Vec<String>>>) {
+    for file in files_to_build {
+        let map = map.clone();
+        let processing = processing.clone();
+        let files = files.clone();
+        let path = Path::new(&path_str);
+        process_file(path, &file, map, files, processing).await;
+    }
+    
+    sort_files(files).await;
+}
+
 #[cfg(not(notify))]
 #[cfg(not(watcherman))]
-async fn watch_inotify(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path, path_str: &String) -> anyhow::Result<()> {
+async fn watch_inotify(tx_builder: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path, path_str: &String) -> anyhow::Result<()> {
     use inotify::{
         EventMask,
         WatchMask,
@@ -401,21 +427,21 @@ async fn watch_inotify(tx: sync::mpsc::Sender<MsgInternalBuilder>, path: &Path, 
                         log::debug!("Directory created: {}/{:?}", dir, event.name);
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File created: {}/{:?}", dir, event.name);
-                        tx.send(MsgInternalBuilder::FileCreated(file)).await.unwrap();
+                        tx_builder.send(MsgInternalBuilder::FileCreated(file)).await.unwrap();
                     }
                 } else if event.mask.contains(EventMask::DELETE) {
                     if event.mask.contains(EventMask::ISDIR) {
                         log::debug!("Directory deleted: {}/{:?}", dir, event.name);
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File deleted: {}", file);
-                        tx.send(MsgInternalBuilder::FileDeleted(file)).await.unwrap();
+                        tx_builder.send(MsgInternalBuilder::FileDeleted(file)).await.unwrap();
                     }
                 } else if event.mask.contains(EventMask::MODIFY) {
                     if event.mask.contains(EventMask::ISDIR) {
                         log::debug!("Directory modified: {}/{:?}", dir, event.name);
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File modified: {}", file);
-                        tx.send(MsgInternalBuilder::FileModified(file)).await.unwrap();
+                        tx_builder.send(MsgInternalBuilder::FileModified(file)).await.unwrap();
                     }
                 }
             }

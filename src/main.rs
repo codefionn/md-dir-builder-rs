@@ -79,7 +79,7 @@ async fn main() {
     ])
     .expect("Failed initializing logger");
 
-    let (tx, mut rx) = sync::mpsc::channel(256);
+    let (tx_srv, mut rx_srv) = sync::mpsc::channel(256);
     let (tx_file, rx_file) = sync::mpsc::channel(256);
 
     let ((app4, tx4), (app6, tx6)) = tokio::join!(
@@ -114,12 +114,12 @@ async fn main() {
     );
 
     task::spawn(async move {
-        builder::builder(tx, args.directory, rx_file).await;
+        builder::builder(tx_srv, args.directory, rx_file).await;
     });
 
     log::debug!("Server is now ready");
 
-    while let Some(msg) = rx.recv().await {
+    while let Some(msg) = rx_srv.recv().await {
         log::debug!("General server event: {:?}", msg);
 
         match msg {
@@ -141,7 +141,17 @@ async fn main() {
                 msg0.unwrap();
                 msg1.unwrap();
             }
-            MsgSrv::Exit() => exit(0),
+            MsgSrv::Exit() => {
+                let (msg0, msg1) = tokio::join!(
+                    tx4.send(MsgSrv::Exit()),
+                    tx6.send(MsgSrv::Exit())
+                );
+
+                // ignore errors
+                msg0.ok();
+                msg1.ok();
+                break;
+            }
         }
     }
 

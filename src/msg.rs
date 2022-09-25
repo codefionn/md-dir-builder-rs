@@ -18,13 +18,16 @@ use tokio::sync;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum MsgSrv {
+    /// Announces a file change
     File(/* path: */ String, /* content: */ String),
+    /// Announces a new file (without contents because they're definitly not required)
     NewFile(/* path: */ String, /* all_files: */ Vec<String>),
     Exit(),
 }
 
 #[derive(Debug)]
 pub enum MsgBuilder {
+    /// Requests a file from the builder
     File(
         /* path: */ String,
         /* result: */ sync::oneshot::Sender<(Option<String>, /* all_files: */ Vec<String>)>,
@@ -34,8 +37,11 @@ pub enum MsgBuilder {
 
 #[derive(Debug)]
 pub enum MsgInternalBuilder {
+    /// Announces that a file was created
     FileCreated(/* path: */ String),
+    /// Announces that a file was modified or created
     FileModified(/* path: */ String),
+    /// Announces that a file was deleted
     FileDeleted(/* path: */ String),
     Exit(),
 }
