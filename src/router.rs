@@ -16,6 +16,8 @@
  */
 use std::{collections::HashMap, sync::Arc};
 
+use crc::Crc;
+
 use ahash::RandomState;
 use chrono::prelude::*;
 use futures::{stream::SplitSink, SinkExt, StreamExt};
@@ -24,11 +26,12 @@ use tokio::{
     task,
 };
 
+use axum::headers::{IfNoneMatch, ETag};
 use axum::{
     body::{Bytes, Full},
     extract::{
         ws::{Message, WebSocket},
-        WebSocketUpgrade,
+        TypedHeader, WebSocketUpgrade,
     },
     http::{StatusCode, Uri},
     response::{Html, IntoResponse, Response},
@@ -58,42 +61,64 @@ async fn ping() -> impl IntoResponse {
 
 macro_rules! get_resource_generator {
     ($name:ident, $type:literal, $path:literal) => {
-        async fn $name() -> Response<Full<Bytes>> {
+        async fn $name(
+            if_none_match: Option<TypedHeader<IfNoneMatch>>,
+        ) -> Response<Full<Bytes>> {
+            let bytes = include_bytes!($path);
+            let hasher = Crc::<u64>::new(&crc::CRC_64_XZ);
+            let etag_hash = format!("\"{}\"", hasher.checksum(bytes).to_string());
+            let etag: ETag = etag_hash.parse().unwrap();
+
+            if let Some(TypedHeader(if_none_match)) = if_none_match {
+                log::debug!("Server({:?}) =? Client({:?})", etag, if_none_match);
+                if if_none_match == IfNoneMatch::from(etag) {
+                    log::debug!("ETag check passed");
+                    return Response::builder()
+                        .status(StatusCode::NOT_MODIFIED)
+                        .body(Full::from(bytes::Bytes::from_static(b"")))
+                        .unwrap();
+                }
+            }
+
             Response::builder()
                 .status(StatusCode::OK)
+                .header("ETag", etag_hash)
                 .header("Content-Type", $type)
-                .body(Full::from(bytes::Bytes::from_static(include_bytes!($path))))
+                .body(Full::from(bytes::Bytes::from_static(bytes)))
                 .unwrap()
         }
     };
 }
 
 macro_rules! get_full_text_page {
-    ($path:literal, $tx_file:ident) => {
-        {
-            let tx_file = $tx_file.clone();
+    ($path:literal, $tx_file:ident) => {{
+        let tx_file = $tx_file.clone();
 
-            get(|| async move {
-                let (tx_onefile, rx_onefile) = sync::oneshot::channel();
+        get(|| async move {
+            let (tx_onefile, rx_onefile) = sync::oneshot::channel();
 
-                tx_file
-                    .clone()
-                    .send(MsgBuilder::AllFiles(tx_onefile))
-                    .await
-                    .unwrap_or_else(|_| panic!("Failed awaiting result"));
+            tx_file
+                .clone()
+                .send(MsgBuilder::AllFiles(tx_onefile))
+                .await
+                .unwrap_or_else(|_| panic!("Failed awaiting result"));
 
-                if let Ok(all_files) = rx_onefile.await {
-                    let result = crate::ui::render_page("License", crate::ui::Contents::Text(include_str!($path)), &all_files[..]);
-                    (StatusCode::OK, Html(format!("{}", result.into_string())))
-                } else {
-                    (StatusCode::GONE, Html(format!("Internal server error")))
-                }
-            })
-        }
-    }
+            if let Ok(all_files) = rx_onefile.await {
+                let result = crate::ui::render_page(
+                    "License",
+                    crate::ui::Contents::Text(include_str!($path)),
+                    &all_files[..],
+                );
+                (StatusCode::OK, Html(format!("{}", result.into_string())))
+            } else {
+                (StatusCode::GONE, Html(format!("Internal server error")))
+            }
+        })
+    }};
 }
 
 get_resource_generator!(ws_js_file, "application/javascript", "./ui/ws.js");
+get_resource_generator!(prism_js_file, "application/javascript", "./ui/prism.js");
 
 #[derive(Clone)]
 struct WsState {
@@ -159,6 +184,7 @@ pub async fn create_router(
     let router = Router::new()
         //.route("/.rsc/Roboto/Roboto-Regular.ttf", get(rsc_roboto_regular))
         .route("/.rsc/ws.js", get(ws_js_file))
+        .route("/.rsc/prism.js", get(prism_js_file))
         .route("/.ws", get(handle_ws))
         .layer(Extension(WsState {
             ws_channels: ws_channels.clone(),

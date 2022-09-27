@@ -19,13 +19,20 @@ use std::{cmp::Ordering, env::current_exe};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 fn render_head(title: &str) -> Markup {
-    let css = include_str!("./style.css");
+    let css = format!(
+        "{}{}",
+        include_str!("./style.css"),
+        include_str!("./prism.css")
+    );
+
     let css = css.replace("\n", "");
     html! {
         meta charset="utf-8";
         title { (title) }
         meta name="description" content=(format!("{}", title));
         script src="/.rsc/ws.js" defer {
+        }
+        script src="/.rsc/prism.js" defer {
         }
         style {
             (PreEscaped(css))

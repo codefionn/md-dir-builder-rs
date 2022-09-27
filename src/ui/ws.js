@@ -1,4 +1,6 @@
+/** @var HTMLElement */
 const comp_content = document.body.querySelector("#contents");
+/** @var HTMLElement */
 const comp_sidebar = document.body.querySelector("#sidebar");
 
 const wslink = "ws://" + document.location.host + "/.ws";
@@ -14,6 +16,9 @@ socket.onmessage = function(event) {
                              .join("/");
     if (current_path === data.path) {
       comp_content.innerHTML = data.content;
+      if (typeof window.Prism === "object") {
+        window.Prism.highlightAllUnder(comp_content);
+      }
     }
     break;
   case "update-sidebar":
@@ -27,6 +32,9 @@ function fetch_contents(pathname, successfn) {
       .then(response => response.text())
       .then(contents => {
         comp_content.innerHTML = contents;
+        if (typeof window.Prism === "object") {
+          window.Prism.highlightAllUnder(comp_content);
+        }
 
         if (successfn) {
           successfn();
