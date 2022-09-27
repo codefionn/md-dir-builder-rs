@@ -26,10 +26,8 @@ Currently markdown parsing is done with the ``pulldown-cmark`` library (like mdB
 
 * Watch newly created directories
 * Handle connection losses to server
-* Add **About** section with option to show GPL license
 * Adjustable IP-address (currently ``127.0.0.1`` and ``::1`` are used)
 * Document the stuff
-* Syntax highlighting for code
 
 ## Vendored dependencies
 
