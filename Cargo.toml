@@ -5,6 +5,7 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 authors = [ "Fionn Langhans <fionn.langhans@gmail.com" ]
 repository = "https://github.com/codefionn/md-dir-builder-rs"
+dependencies = "Webserver for serving all markdown files in a directory"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
