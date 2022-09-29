@@ -26,7 +26,7 @@ use tokio::{
     task,
 };
 
-use axum::headers::{IfNoneMatch, ETag};
+use axum::headers::{ETag, IfNoneMatch};
 use axum::{
     body::{Bytes, Full},
     extract::{
@@ -61,9 +61,7 @@ async fn ping() -> impl IntoResponse {
 
 macro_rules! get_resource_generator {
     ($name:ident, $type:literal, $path:literal) => {
-        async fn $name(
-            if_none_match: Option<TypedHeader<IfNoneMatch>>,
-        ) -> Response<Full<Bytes>> {
+        async fn $name(if_none_match: Option<TypedHeader<IfNoneMatch>>) -> Response<Full<Bytes>> {
             let bytes = include_bytes!($path);
             let hasher = Crc::<u64>::new(&crc::CRC_64_XZ);
             let etag_hash = format!("\"{}\"", hasher.checksum(bytes).to_string());

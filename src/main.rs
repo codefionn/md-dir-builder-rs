@@ -47,16 +47,21 @@ struct Args {
     #[clap(short, long, value_parser, default_value_t = 8080)]
     port: u16,
 
-    /// Number of times to greet
+    /// Directory where to serve the markdown files from
     #[clap(short, long, value_parser, default_value = ".")]
     directory: String,
 
-    /// Number of times to greet
+    /// Parser used to transform markdown files to HTML
     #[clap(long, value_enum, default_value_t = ParserType::CommonMark)]
     parser: ParserType,
 
+    /// Be verbose
     #[clap(short, long, value_parser, default_value_t = false)]
     verbose: bool,
+
+    /// Open in browser
+    #[clap(long = "no-open", value_parser, default_value_t = false)]
+    no_open: bool,
 }
 
 #[tokio::main]
@@ -116,6 +121,10 @@ async fn main() {
     task::spawn(async move {
         builder::builder(tx_srv, args.directory, rx_file).await;
     });
+
+    if !args.no_open {
+        webbrowser::open(format!("http://[::1]:{}", args.port).as_str()).ok();
+    }
 
     log::debug!("Server is now ready");
 
