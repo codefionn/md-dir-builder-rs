@@ -14,7 +14,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  */
-use std::{cmp::Ordering, env::current_exe};
+use std::cmp::Ordering;
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 

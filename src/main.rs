@@ -22,13 +22,9 @@ mod ui;
 
 use log::LevelFilter;
 use msg::{MsgBuilder, MsgSrv};
-use simplelog::{CombinedLogger, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{CombinedLogger, TermLogger, TerminalMode};
 
-use std::{
-    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
-    path::Path,
-    process::exit,
-};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
 use clap::Parser;
 use tokio::{sync, task};

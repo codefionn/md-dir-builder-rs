@@ -19,18 +19,11 @@ use crate::msg::MsgBuilder;
 use crate::msg::MsgInternalBuilder;
 use ahash::RandomState;
 use futures::Future;
-use serde::Deserialize;
 use std::{cmp::Ordering, collections::HashMap, path::Path, sync::Arc};
-use tokio::{
-    runtime::Builder,
-    sync::{self, Mutex},
-    task,
-};
+use tokio::sync::{self, Mutex};
 
 #[cfg(watchman)]
 use watchman_client::prelude::*;
-
-use anyhow::anyhow;
 
 use super::MsgSrv;
 use std::fs;
@@ -197,7 +190,7 @@ async fn sort_files(files: Arc<Mutex<Vec<String>>>) {
 pub async fn builder(
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
-    mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
+    rx_file: sync::mpsc::Receiver<MsgBuilder>,
 ) {
     #[cfg(watchman)]
     let fs_change = watcher_watchman;
@@ -220,7 +213,7 @@ pub async fn builder(
 pub async fn builder_with_fs_change<R, T>(
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
-    mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
+    rx_file: sync::mpsc::Receiver<MsgBuilder>,
     fs_change: T,
 ) where
     R: Future<Output = anyhow::Result<()>>,
@@ -271,7 +264,7 @@ pub async fn builder_with_fs_change<R, T>(
     }
 
     // Listen to file (created,modified,deleted) events and react accordingly
-    let (tx_builder, mut rx_builder) = sync::mpsc::channel(128);
+    let (tx_builder, rx_builder) = sync::mpsc::channel(128);
     {
         let path_str = path_str.clone();
         let map = map.clone();
@@ -288,7 +281,6 @@ pub async fn builder_with_fs_change<R, T>(
         let path_str = path_str.clone();
         let map = map.clone();
         let processing = processing.clone();
-        let files_clone = files.clone();
         let files = files.clone();
 
         rt.spawn(async move {
@@ -372,7 +364,6 @@ async fn file_builder(
                         webpath,
                         true
                     );
-                    let content = map.lock().await.get(&webpath).unwrap().clone();
                     sort_files(files.clone()).await;
                     tx_srv
                         .send(MsgSrv::NewFile(webpath, files.lock().await.clone()))
@@ -389,7 +380,7 @@ async fn file_builder(
                     tx_srv.send(MsgSrv::File(webpath, content)).await.unwrap();
                 }
             }
-            MsgInternalBuilder::FileDeleted(file) => {}
+            MsgInternalBuilder::FileDeleted(_file) => {}
             MsgInternalBuilder::Exit() => {
                 break;
             }

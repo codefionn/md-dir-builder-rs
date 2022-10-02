@@ -19,7 +19,6 @@ use std::{collections::HashMap, sync::Arc};
 use crc::Crc;
 
 use ahash::RandomState;
-use chrono::prelude::*;
 use futures::{stream::SplitSink, SinkExt, StreamExt};
 use tokio::{
     sync::{self, Mutex},
@@ -206,7 +205,7 @@ pub async fn create_router(
 
                 if let Ok(result) = rx_onefile.await {
                     match result {
-                        (Some(result), files) => {
+                        (Some(result), _files) => {
                             let result = format!(
                                 "{}",
                                 crate::ui::render_contents(crate::ui::Contents::Html(
@@ -217,7 +216,7 @@ pub async fn create_router(
 
                             (StatusCode::OK, Html(result))
                         }
-                        (None, files) => {
+                        (None, _files) => {
                             let result = format!(
                                 "{}",
                                 crate::ui::render_contents(crate::ui::Contents::NotFound())
@@ -286,7 +285,7 @@ async fn handle_ws(ws: WebSocketUpgrade, Extension(state): Extension<WsState>) -
     ws.on_upgrade(|socket| handle_ws_socket(socket, state))
 }
 
-async fn handle_ws_socket(mut socket: WebSocket, state: WsState) {
+async fn handle_ws_socket(socket: WebSocket, state: WsState) {
     log::debug!("Established websocket connection");
 
     let (tx_ws, mut rx_ws) = sync::mpsc::channel(128);
@@ -345,8 +344,8 @@ async fn handle_ws_socket(mut socket: WebSocket, state: WsState) {
     }
 
     while let Some(msg) = receiver.next().await {
-        let msg = if let Ok(msg) = msg {
-            msg
+        if let Ok(_msg) = msg {
+            continue;
         } else {
             // client disconnected
             tx_ws.send(MsgSrv::Exit()).await.unwrap();
