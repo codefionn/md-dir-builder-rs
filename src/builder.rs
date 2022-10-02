@@ -127,12 +127,13 @@ fn broad_file_search(path_str: String) -> Vec<String> {
 /// ## Result
 ///
 /// Returns ``true`` on success, otherwise ``false``.
-async fn process_file(
+async fn process_file<ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync>(
     dir: &Path,
     file_str: &String,
     map: Arc<Mutex<HashMap<String, String, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    fs_read_file: ReadFile
 ) -> bool {
     let webpath = format!("/{}", file_str);
     log::debug!("Processing file {}", webpath);
@@ -145,7 +146,7 @@ async fn process_file(
     let mut success = true;
 
     let path = dir.join(file_str);
-    match fs::read_to_string(path.clone()) {
+    match fs_read_file(path.to_string_lossy().to_string()) {
         Ok(result) => {
             let html = crate::markdown::CommonMarkParser::default().parse_to_html(result.as_str());
             map.lock().await.insert(webpath.clone(), html);
@@ -204,18 +205,30 @@ pub async fn builder(
     #[cfg(not(watchman))]
     let fs_change = watch_inotify;
 
-    builder_with_fs_change(tx_srv, path_str, rx_file, fs_change).await;
+    builder_with_fs_change(tx_srv, path_str, rx_file, fs_change, std_read_file, broad_file_search).await;
+}
+
+fn std_read_file(s: String) -> anyhow::Result<String> {
+    let path = Path::new(&s);
+    match fs::read_to_string(path) {
+        Ok(result) => Ok(result),
+        Err(err) => Err(anyhow::anyhow!("{}", err))
+    }
 }
 
 /// Creats the Markdown to HTML builder with filechange watcher
 ///
 /// This watches the given directory ``path_str`` and rebuilds new or modified files.
-pub async fn builder_with_fs_change<R, T>(
+pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
     rx_file: sync::mpsc::Receiver<MsgBuilder>,
     fs_change: T,
+    fs_read_file: ReadFile,
+    broad_file_search: BroadFileSearch
 ) where
+    BroadFileSearch: Fn(String) -> Vec<String>,
+    ReadFile: Fn(String) -> anyhow::Result<String> + Clone + Sync + Send + 'static,
     R: Future<Output = anyhow::Result<()>>,
     T: Fn(sync::mpsc::Sender<MsgInternalBuilder>, String) -> R,
 {
@@ -270,9 +283,10 @@ pub async fn builder_with_fs_change<R, T>(
         let map = map.clone();
         let files = files.clone();
         let processing = processing.clone();
+        let fs_read_file = fs_read_file.clone();
 
         rt.spawn(async move {
-            file_builder(rx_builder, tx_srv, path_str, processing, map, files).await;
+            file_builder(rx_builder, tx_srv, path_str, processing, map, files, fs_read_file).await;
         });
     }
 
@@ -282,9 +296,10 @@ pub async fn builder_with_fs_change<R, T>(
         let map = map.clone();
         let processing = processing.clone();
         let files = files.clone();
+        let fs_read_file = fs_read_file.clone();
 
         rt.spawn(async move {
-            initial_build(files_to_build, path_str, processing, map, files).await;
+            initial_build(files_to_build, path_str, processing, map, files, fs_read_file).await;
         });
     }
 
@@ -340,13 +355,14 @@ async fn server_queries(
     log::debug!("Exited file communication");
 }
 
-async fn file_builder(
+async fn file_builder<ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync>(
     mut rx_builder: sync::mpsc::Receiver<MsgInternalBuilder>,
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
     map: Arc<Mutex<HashMap<String, String, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
+    fs_read_file: ReadFile
 ) {
     log::debug!("Started file builder listener");
     let path = Path::new(&path_str);
@@ -356,7 +372,7 @@ async fn file_builder(
 
         match msg {
             MsgInternalBuilder::FileCreated(file) => {
-                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await
+                if process_file(&path, &file, map.clone(), files.clone(), processing.clone(), fs_read_file.clone()).await
                 {
                     let webpath = format!("/{}", file);
                     log::debug!(
@@ -372,7 +388,7 @@ async fn file_builder(
                 }
             }
             MsgInternalBuilder::FileModified(file) => {
-                if process_file(&path, &file, map.clone(), files.clone(), processing.clone()).await
+                if process_file(&path, &file, map.clone(), files.clone(), processing.clone(), fs_read_file.clone()).await
                 {
                     let webpath = format!("/{}", file);
                     log::debug!("Sending processed file {} to server", webpath);
@@ -390,19 +406,20 @@ async fn file_builder(
     log::debug!("Exited file builder listener");
 }
 
-async fn initial_build(
+async fn initial_build<ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync>(
     files_to_build: Vec<String>,
     path_str: String,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
     map: Arc<Mutex<HashMap<String, String, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
+    fs_read_file: ReadFile
 ) {
     for file in files_to_build {
         let map = map.clone();
         let processing = processing.clone();
         let files = files.clone();
         let path = Path::new(&path_str);
-        process_file(path, &file, map, files, processing).await;
+        process_file(path, &file, map, files, processing, fs_read_file.clone()).await;
     }
 
     sort_files(files).await;
