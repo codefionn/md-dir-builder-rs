@@ -18,6 +18,7 @@ use crate::markdown::MarkdownParser;
 use crate::msg::MsgBuilder;
 use crate::msg::MsgInternalBuilder;
 use ahash::RandomState;
+use futures::Future;
 use serde::Deserialize;
 use std::{cmp::Ordering, collections::HashMap, path::Path, sync::Arc};
 use tokio::{
@@ -198,6 +199,33 @@ pub async fn builder(
     path_str: String,
     mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
 ) {
+    #[cfg(watchman)]
+    let fs_change = watcher_watchman;
+
+    #[cfg(notify)]
+    #[cfg(not(watchman))]
+    let fs_change = watcher_notify;
+
+    // Listen to file changes in the specified directory
+    #[cfg(not(notify))]
+    #[cfg(not(watchman))]
+    let fs_change = watch_inotify;
+
+    builder_with_fs_change(tx_srv, path_str, rx_file, fs_change).await;
+}
+
+/// Creats the Markdown to HTML builder with filechange watcher
+///
+/// This watches the given directory ``path_str`` and rebuilds new or modified files.
+pub async fn builder_with_fs_change<R, T>(
+    tx_srv: sync::mpsc::Sender<MsgSrv>,
+    path_str: String,
+    mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
+    fs_change: T,
+) where
+    R: Future<Output = anyhow::Result<()>>,
+    T: Fn(sync::mpsc::Sender<MsgInternalBuilder>, String) -> R,
+{
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     let path = Path::new(&path_str);
@@ -268,21 +296,8 @@ pub async fn builder(
         });
     }
 
-    #[cfg(watchman)]
-    if let Err(err) = watcher_watchman(tx_builder, &path, &path_str).await {
-        log::error!("An error occured watching files: {}", err);
-    }
-
-    #[cfg(notify)]
-    #[cfg(not(watchman))]
-    if let Err(err) = watcher_notify(tx_builder, &path, &path_str).await {
-        log::error!("An error occured watching files: {}", err);
-    }
-
     // Listen to file changes in the specified directory
-    #[cfg(not(notify))]
-    #[cfg(not(watchman))]
-    if let Err(err) = watch_inotify(tx_builder.clone(), &path, &path_str).await {
+    if let Err(err) = fs_change(tx_builder.clone(), path_str).await {
         log::error!("An error occured watching files: {}", err);
     }
 
@@ -406,9 +421,10 @@ async fn initial_build(
 #[cfg(not(watcherman))]
 async fn watch_inotify(
     tx_builder: sync::mpsc::Sender<MsgInternalBuilder>,
-    path: &Path,
-    path_str: &String,
+    path_str: String,
 ) -> anyhow::Result<()> {
+    let path = Path::new(&path_str);
+
     use inotify::{EventMask, Inotify, WatchMask};
 
     let mut inotify = Inotify::init()?;
@@ -423,7 +439,7 @@ async fn watch_inotify(
         String::new(),
     );
 
-    let dirs = broad_dir_search(path_str);
+    let dirs = broad_dir_search(&path_str);
     for dir in dirs.iter() {
         let dir_path = path.join(dir);
         wd_to_dir.insert(
@@ -454,6 +470,13 @@ async fn watch_inotify(
                 if event.mask.contains(EventMask::CREATE) {
                     if event.mask.contains(EventMask::ISDIR) {
                         log::debug!("Directory created: {}/{:?}", dir, event.name);
+                        wd_to_dir.insert(
+                            inotify.add_watch(
+                                file.to_string(),
+                                WatchMask::MODIFY | WatchMask::CREATE | WatchMask::DELETE,
+                            )?,
+                            file.to_string(),
+                        );
                     } else if is_markdown.is_match(file.as_str()) {
                         log::debug!("File created: {}/{:?}", dir, event.name);
                         tx_builder
@@ -491,9 +514,10 @@ async fn watch_inotify(
 #[cfg(not(watchman))]
 async fn watcher_notify(
     tx: sync::mpsc::Sender<MsgInternalBuilder>,
-    path: &Path,
-    path_str: &String,
+    path_str: String,
 ) -> anyhow::Result<()> {
+    let path = Path::new(&path_str);
+
     let real_path = match path.canonicalize() {
         Ok(real_path) => real_path.to_string_lossy().to_string(),
         _ => path_str.clone(),
@@ -533,9 +557,10 @@ query_result_type! {
 #[cfg(watchman)]
 async fn watcher_watchman(
     tx: sync::mpsc::Sender<MsgInternalBuilder>,
-    path: &Path,
-    path_str: &String,
+    path_str: String,
 ) -> anyhow::Result<()> {
+    let path = Path::new(&path_str);
+
     let client = Connector::new().connect().await?;
     let path = CanonicalPath::canonicalize(&path)?;
     let resolved_root = client.resolve_root(path).await?;
