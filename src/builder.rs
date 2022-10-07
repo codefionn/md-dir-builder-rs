@@ -238,13 +238,13 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
 
     if !path.exists() {
         log::error!("Directory {} does not exist", &path_str);
-        tx_srv.send(MsgSrv::Exit()).await.unwrap();
+        tx_srv.send(MsgSrv::Exit()).await.ok();
         return;
     }
 
     if !path.is_dir() {
         log::error!("Path {} is not a directory", &path_str);
-        tx_srv.send(MsgSrv::Exit()).await.unwrap();
+        tx_srv.send(MsgSrv::Exit()).await.ok();
         return;
     }
 
