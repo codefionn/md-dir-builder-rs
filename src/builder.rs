@@ -191,6 +191,7 @@ async fn sort_files(files: Arc<Mutex<Vec<String>>>) {
 pub async fn builder(
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
+    tx_file: sync::mpsc::Sender<MsgBuilder>,
     rx_file: sync::mpsc::Receiver<MsgBuilder>,
 ) {
     #[cfg(feature = "watchman")]
@@ -205,7 +206,7 @@ pub async fn builder(
     #[cfg(not(feature = "watchman"))]
     let fs_change = watch_inotify;
 
-    builder_with_fs_change(tx_srv, path_str, rx_file, fs_change, std_read_file, broad_file_search).await;
+    builder_with_fs_change(tx_srv, path_str, tx_file, rx_file, fs_change, std_read_file, broad_file_search).await;
 }
 
 fn std_read_file(s: String) -> anyhow::Result<String> {
@@ -222,6 +223,7 @@ fn std_read_file(s: String) -> anyhow::Result<String> {
 pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
+    tx_file: sync::mpsc::Sender<MsgBuilder>,
     rx_file: sync::mpsc::Receiver<MsgBuilder>,
     fs_change: T,
     fs_read_file: ReadFile,
@@ -280,8 +282,9 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
         let files = files.clone();
         let processing = processing.clone();
         let fs_read_file = fs_read_file.clone();
+        let tx_file = tx_file.clone();
 
-        file_builder(rx_builder, tx_srv, path_str, processing, map, files, fs_read_file)
+        file_builder(rx_builder, tx_file, tx_srv, path_str, processing, map, files, fs_read_file)
     };
 
     // Initial build step: Builds all detected files
@@ -292,7 +295,9 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
         let files = files.clone();
         let fs_read_file = fs_read_file.clone();
 
-        initial_build(files_to_build, path_str, processing, map, files, fs_read_file)
+        initial_build(files_to_build, path_str, processing, map, files, fs_read_file).await;
+
+        async move {}
     };
 
     // Listen to file changes in the specified directory
@@ -324,10 +329,10 @@ async fn server_queries(
     map: Arc<Mutex<HashMap<String, String, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
 ) {
-    log::debug!("Started file reader");
+    log::debug!("Started file communication");
 
     while let Some(msg) = rx_file.recv().await {
-        log::debug!("File reader event: {:?}", msg);
+        log::debug!("File communication event: {:?}", msg);
 
         match msg {
             MsgBuilder::File(path, result) => {
@@ -364,6 +369,7 @@ async fn server_queries(
 
 async fn file_builder<ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync>(
     mut rx_builder: sync::mpsc::Receiver<MsgInternalBuilder>,
+    tx_file: sync::mpsc::Sender<MsgBuilder>,
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
@@ -375,7 +381,7 @@ async fn file_builder<ReadFile: Fn(String) -> anyhow::Result<String> + Clone + s
     let path = Path::new(&path_str);
 
     while let Some(msg) = rx_builder.recv().await {
-        log::debug!("File builder event: {:?}", msg);
+        log::debug!("File builder listener event: {:?}", msg);
 
         match msg {
             MsgInternalBuilder::FileCreated(file) => {
@@ -408,6 +414,7 @@ async fn file_builder<ReadFile: Fn(String) -> anyhow::Result<String> + Clone + s
             MsgInternalBuilder::FileDeleted(_file) => {}
             MsgInternalBuilder::Ignore() => {}
             MsgInternalBuilder::Exit() => {
+                let _ = tokio::join!(tx_srv.send(MsgSrv::Exit()), tx_file.send(MsgBuilder::Exit()));
                 break;
             }
         }

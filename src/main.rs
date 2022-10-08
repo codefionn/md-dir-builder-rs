@@ -120,7 +120,7 @@ async fn main() {
     );
 
     let builder_handle = task::spawn(async move {
-        builder::builder(tx_srv, args.directory, rx_file).await;
+        builder::builder(tx_srv, args.directory, tx_file.clone(), rx_file).await;
     });
 
     if !args.no_open {
