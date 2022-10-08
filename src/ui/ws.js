@@ -14,6 +14,7 @@ socket.onmessage = function(event) {
     const current_path = document.location.pathname.split("/")
                              .map(part => decodeURI(part))
                              .join("/");
+    console.debug("Check: " + current_path + " === " + data.path);
     if (current_path === data.path) {
       comp_content.innerHTML = data.content;
       if (typeof window.Prism === "object") {

@@ -20,6 +20,9 @@ mod msg;
 mod router;
 mod ui;
 
+#[cfg(test)]
+mod tests;
+
 use log::LevelFilter;
 use msg::{MsgBuilder, MsgSrv};
 use simplelog::{CombinedLogger, TermLogger, TerminalMode};
@@ -28,6 +31,8 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
 use clap::Parser;
 use tokio::{sync, task};
+
+pub(crate) const CHANNEL_COUNT: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub enum ParserType {
@@ -80,10 +85,10 @@ async fn main() {
     ])
     .expect("Failed initializing logger");
 
-    let (tx_srv, mut rx_srv) = sync::mpsc::channel(256);
-    let (tx_file, rx_file) = sync::mpsc::channel(256);
+    let (tx_srv, rx_srv) = sync::mpsc::channel(CHANNEL_COUNT);
+    let (tx_file, rx_file) = sync::mpsc::channel(CHANNEL_COUNT);
 
-    let ((app4, tx4), (app6, tx6)) = tokio::join!(
+    let ((app4, tx4, handle4), (app6, tx6, handle6)) = tokio::join!(
         router::create_router(tx_file.clone()),
         router::create_router(tx_file.clone())
     );
@@ -101,7 +106,7 @@ async fn main() {
         .unwrap_or_else(|_| panic!("Port {} is already in use", args.port))
         .serve(app6.into_make_service());
 
-    task::spawn(async move {
+    let servers_handle = task::spawn(async move {
         let (server4, server6) = tokio::join!(server4, server6);
 
         server4.unwrap();
@@ -114,7 +119,7 @@ async fn main() {
         args.port
     );
 
-    task::spawn(async move {
+    let builder_handle = task::spawn(async move {
         builder::builder(tx_srv, args.directory, rx_file).await;
     });
 
@@ -124,6 +129,22 @@ async fn main() {
 
     log::debug!("Server is now ready");
 
+    let servers_multiplexer_handle = task::spawn(async move {
+        servers_multiplexer(rx_srv, tx4, tx6).await;
+    });
+
+    let _ = tokio::join!(
+        handle4,
+        handle6,
+        servers_handle,
+        builder_handle,
+        servers_multiplexer_handle
+    );
+
+    log::debug!("Exited silently");
+}
+
+async fn servers_multiplexer(mut rx_srv: sync::mpsc::Receiver<MsgSrv>, tx4: sync::mpsc::Sender<MsgSrv>, tx6: sync::mpsc::Sender<MsgSrv>) {
     while let Some(msg) = rx_srv.recv().await {
         log::debug!("General server event: {:?}", msg);
 
@@ -156,6 +177,10 @@ async fn main() {
             }
         }
     }
+}
 
-    log::debug!("Exited silently");
+pub(crate) async fn why_is_this_necessary<T: Sized + Clone>(sender: &sync::mpsc::Sender<T>, ignore: T) {
+    for _ in 0..sender.capacity()+1 {
+        sender.send(ignore.clone()).await.ok();
+    }
 }

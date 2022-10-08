@@ -139,14 +139,14 @@ fn determine_real_path(path: &str) -> String {
 
 pub async fn create_router(
     tx_file: sync::mpsc::Sender<MsgBuilder>,
-) -> (Router, tokio::sync::mpsc::Sender<MsgSrv>) {
-    let (tx, mut rx) = sync::mpsc::channel(128);
+) -> (Router, tokio::sync::mpsc::Sender<MsgSrv>, tokio::task::JoinHandle<()>) {
+    let (tx, mut rx) = sync::mpsc::channel(crate::CHANNEL_COUNT);
     let ws_channels: Arc<Mutex<HashMap<i64, sync::mpsc::Sender<MsgSrv>, RandomState>>> = Arc::new(
         Mutex::new(HashMap::with_capacity_and_hasher(4, RandomState::new())),
     );
 
     let ws_channels_for_listener = ws_channels.clone();
-    task::spawn(async move {
+    let server_router_handle = task::spawn(async move {
         while let Some(msg) = rx.recv().await {
             log::debug!("Server event: {:?}", msg);
 
@@ -277,7 +277,7 @@ pub async fn create_router(
             }
         }));
 
-    (router, tx)
+    (router, tx, server_router_handle)
 }
 
 async fn handle_ws(ws: WebSocketUpgrade, Extension(state): Extension<WsState>) -> Response {
@@ -288,10 +288,10 @@ async fn handle_ws(ws: WebSocketUpgrade, Extension(state): Extension<WsState>) -
 async fn handle_ws_socket(socket: WebSocket, state: WsState) {
     log::debug!("Established websocket connection");
 
-    let (tx_ws, mut rx_ws) = sync::mpsc::channel(128);
+    let (tx_ws, mut rx_ws) = sync::mpsc::channel(crate::CHANNEL_COUNT);
     let (mut sender, mut receiver) = socket.split();
 
-    task::spawn(async move {
+    let websocket_sender_handle = task::spawn(async move {
         while let Some(msg) = rx_ws.recv().await {
             log::debug!("WebSocket Channel received: {:?}", msg);
 
@@ -336,24 +336,28 @@ async fn handle_ws_socket(socket: WebSocket, state: WsState) {
         }
     });
 
-    // Announce presence of the web socket
-    let id = chrono::offset::Utc::now().timestamp_nanos();
-    {
-        let mut ws_channels = state.ws_channels.lock().await;
-        ws_channels.insert(id, tx_ws.clone());
-    }
+    let websocket_listener_handle = task::spawn(async move {
+        // Announce presence of the web socket
+        let id = chrono::offset::Utc::now().timestamp_nanos();
+        {
+            let mut ws_channels = state.ws_channels.lock().await;
+            ws_channels.insert(id, tx_ws.clone());
+        }
 
-    while let Some(msg) = receiver.next().await {
-        if let Ok(_msg) = msg {
-            continue;
-        } else {
-            // client disconnected
-            tx_ws.send(MsgSrv::Exit()).await.unwrap();
-            break;
-        };
-    }
+        while let Some(msg) = receiver.next().await {
+            if let Ok(_msg) = msg {
+                continue;
+            } else {
+                // client disconnected
+                tx_ws.send(MsgSrv::Exit()).await.unwrap();
+                break;
+            };
+        }
 
-    state.ws_channels.lock().await.remove_entry(&id);
+        state.ws_channels.lock().await.remove_entry(&id);
+    });
+
+    let _ = tokio::join!(websocket_listener_handle, websocket_sender_handle);
 
     log::debug!("Closed websocket connection");
 }

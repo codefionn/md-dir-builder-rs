@@ -38,7 +38,7 @@ pub enum MsgBuilder {
     Exit(),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MsgInternalBuilder {
     /// Announces that a file was created
     FileCreated(/* path: */ String),
@@ -46,5 +46,6 @@ pub enum MsgInternalBuilder {
     FileModified(/* path: */ String),
     /// Announces that a file was deleted
     FileDeleted(/* path: */ String),
+    Ignore(),
     Exit(),
 }
