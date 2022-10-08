@@ -1,18 +1,19 @@
 use std::time::Duration;
 
-use crate::{builder::*, msg::{MsgInternalBuilder, MsgBuilder, MsgSrv}};
+use crate::{
+    builder::*,
+    msg::{MsgBuilder, MsgInternalBuilder, MsgSrv},
+};
 use simplelog::{CombinedLogger, TermLogger, TerminalMode};
 use tokio::{sync, task};
 
 fn setup_log() {
-    CombinedLogger::init(vec![
-        TermLogger::new(
-            log::LevelFilter::Debug,
-            simplelog::Config::default(),
-            TerminalMode::Mixed,
-            simplelog::ColorChoice::Auto,
-        ),
-    ]);
+    CombinedLogger::init(vec![TermLogger::new(
+        log::LevelFilter::Debug,
+        simplelog::Config::default(),
+        TerminalMode::Mixed,
+        simplelog::ColorChoice::Auto,
+    )]);
 }
 
 macro_rules! broad_file_search_generate {
@@ -23,12 +24,8 @@ macro_rules! broad_file_search_generate {
 
 fn fs_read_file(s: String) -> anyhow::Result<String> {
     match s.as_str() {
-        "./README.md" | ".\\README.md" => {
-            Ok("# README".to_string())
-        }
-        "./test.md" | ".\\test.md" => {
-            Ok("# test header".to_string())
-        }
+        "./README.md" | ".\\README.md" => Ok("# README".to_string()),
+        "./test.md" | ".\\test.md" => Ok("# test header".to_string()),
         _ => {
             assert!(false, "Should not be reached");
             Err(anyhow::anyhow!("Should not be reached"))
@@ -36,13 +33,21 @@ fn fs_read_file(s: String) -> anyhow::Result<String> {
     }
 }
 
-async fn fs_no_change(tx: sync::mpsc::Sender<MsgInternalBuilder>, _s: String) -> anyhow::Result<()> {
+async fn fs_no_change(
+    tx: sync::mpsc::Sender<MsgInternalBuilder>,
+    _s: String,
+) -> anyhow::Result<()> {
     tx.send(MsgInternalBuilder::Exit()).await.ok();
     Ok(())
 }
 
-async fn fs_change_add_test(tx: sync::mpsc::Sender<MsgInternalBuilder>, _s: String) -> anyhow::Result<()> {
-    tx.send(MsgInternalBuilder::FileCreated("test.md".to_string())).await.unwrap();
+async fn fs_change_add_test(
+    tx: sync::mpsc::Sender<MsgInternalBuilder>,
+    _s: String,
+) -> anyhow::Result<()> {
+    tx.send(MsgInternalBuilder::FileCreated("test.md".to_string()))
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_secs(5)).await;
     tx.send(MsgInternalBuilder::Exit()).await.ok();
     Ok(())
@@ -67,14 +72,21 @@ async fn test_initial_build() {
                 fs_no_change,
                 fs_read_file,
                 broad_file_search_generate!(vec!["README.md", "test.md"]),
-            ).await;
+            )
+            .await;
         })
     };
 
     let (tx_oneshot, rx_oneshot) = sync::oneshot::channel();
     let (tx_oneshot_test, rx_oneshot_test) = sync::oneshot::channel();
-    assert!(tx_file.send(MsgBuilder::File("/README.md".to_string(), tx_oneshot)).await.is_ok());
-    assert!(tx_file.send(MsgBuilder::File("/test.md".to_string(), tx_oneshot_test)).await.is_ok());
+    assert!(tx_file
+        .send(MsgBuilder::File("/README.md".to_string(), tx_oneshot))
+        .await
+        .is_ok());
+    assert!(tx_file
+        .send(MsgBuilder::File("/test.md".to_string(), tx_oneshot_test))
+        .await
+        .is_ok());
 
     let (file, files) = rx_oneshot.await.expect("Expected builded file");
     let (file_test, _) = rx_oneshot_test.await.expect("Expected builded file");
@@ -97,7 +109,7 @@ async fn test_add_file() {
         let tx_file = tx_file.clone();
 
         task::spawn(async move {
-        builder_with_fs_change(
+            builder_with_fs_change(
                 tx_srv,
                 ".".to_string(),
                 tx_file.clone(),
@@ -105,18 +117,25 @@ async fn test_add_file() {
                 fs_change_add_test,
                 fs_read_file,
                 broad_file_search_generate!(vec!["README.md"]),
-            ).await;
+            )
+            .await;
         })
     };
 
     let (tx_oneshot, rx_oneshot) = sync::oneshot::channel();
-    assert!(tx_file.send(MsgBuilder::File("/README.md".to_string(), tx_oneshot)).await.is_ok());
+    assert!(tx_file
+        .send(MsgBuilder::File("/README.md".to_string(), tx_oneshot))
+        .await
+        .is_ok());
     let (file, _) = rx_oneshot.await.expect("Expected builded file");
 
     log::debug!("{:?}", rx_srv.recv().await);
 
     let (tx_oneshot_test, rx_oneshot_test) = sync::oneshot::channel();
-    assert!(tx_file.send(MsgBuilder::File("/test.md".to_string(), tx_oneshot_test)).await.is_ok());
+    assert!(tx_file
+        .send(MsgBuilder::File("/test.md".to_string(), tx_oneshot_test))
+        .await
+        .is_ok());
     let (file_test, files) = rx_oneshot_test.await.expect("Expected builded file");
 
     log::debug!("{:?}", rx_srv.recv().await);

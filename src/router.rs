@@ -137,7 +137,10 @@ fn determine_real_path(path: &str) -> String {
     );
 }
 
-async fn request_just_file_contents(requested_file: String, tx_file: sync::mpsc::Sender<MsgBuilder>) -> impl IntoResponse {
+async fn request_just_file_contents(
+    requested_file: String,
+    tx_file: sync::mpsc::Sender<MsgBuilder>,
+) -> impl IntoResponse {
     log::debug!("Requested file contents: {}", requested_file);
     let (tx_onefile, rx_onefile) = sync::oneshot::channel();
     tx_file
@@ -145,27 +148,24 @@ async fn request_just_file_contents(requested_file: String, tx_file: sync::mpsc:
         .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
         .await
         .unwrap_or_else(|_| panic!("Failed awaiting result"));
-    
+
     if let Ok(result) = rx_onefile.await {
         match result {
             (Some(result), _files) => {
                 let result = format!(
                     "{}",
-                    crate::ui::render_contents(crate::ui::Contents::Html(
-                        result.as_str()
-                    ))
-                    .into_string()
+                    crate::ui::render_contents(crate::ui::Contents::Html(result.as_str()))
+                        .into_string()
                 );
-    
+
                 (StatusCode::OK, Html(result))
             }
             (None, _files) => {
                 let result = format!(
                     "{}",
-                    crate::ui::render_contents(crate::ui::Contents::NotFound())
-                        .into_string()
+                    crate::ui::render_contents(crate::ui::Contents::NotFound()).into_string()
                 );
-    
+
                 (StatusCode::NOT_FOUND, Html(result))
             }
         }
@@ -174,7 +174,10 @@ async fn request_just_file_contents(requested_file: String, tx_file: sync::mpsc:
     }
 }
 
-async fn request_file(requested_file: String, tx_file: sync::mpsc::Sender<MsgBuilder>) -> impl IntoResponse {
+async fn request_file(
+    requested_file: String,
+    tx_file: sync::mpsc::Sender<MsgBuilder>,
+) -> impl IntoResponse {
     log::debug!("Requested file: {}", requested_file);
     let (tx_onefile, rx_onefile) = sync::oneshot::channel();
     tx_file
@@ -182,7 +185,7 @@ async fn request_file(requested_file: String, tx_file: sync::mpsc::Sender<MsgBui
         .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
         .await
         .unwrap_or_else(|_| panic!("Failed awaiting result"));
-    
+
     if let Ok(result) = rx_onefile.await {
         match result {
             (Some(result), files) => {
@@ -195,7 +198,7 @@ async fn request_file(requested_file: String, tx_file: sync::mpsc::Sender<MsgBui
                     )
                     .into_string()
                 );
-    
+
                 (StatusCode::OK, Html(result))
             }
             (None, files) => {
@@ -208,7 +211,7 @@ async fn request_file(requested_file: String, tx_file: sync::mpsc::Sender<MsgBui
                     )
                     .into_string()
                 );
-    
+
                 (StatusCode::NOT_FOUND, Html(result))
             }
         }
@@ -219,7 +222,11 @@ async fn request_file(requested_file: String, tx_file: sync::mpsc::Sender<MsgBui
 
 pub async fn create_router(
     tx_file: sync::mpsc::Sender<MsgBuilder>,
-) -> (Router, tokio::sync::mpsc::Sender<MsgSrv>, tokio::task::JoinHandle<()>) {
+) -> (
+    Router,
+    tokio::sync::mpsc::Sender<MsgSrv>,
+    tokio::task::JoinHandle<()>,
+) {
     let (tx, mut rx) = sync::mpsc::channel(crate::CHANNEL_COUNT);
     let ws_channels: Arc<Mutex<HashMap<i64, sync::mpsc::Sender<MsgSrv>, RandomState>>> = Arc::new(
         Mutex::new(HashMap::with_capacity_and_hasher(4, RandomState::new())),
@@ -281,51 +288,60 @@ pub async fn create_router(
         .route("/", {
             let tx_file = tx_file.clone();
             get(|| async move {
-    let (tx_files, rx_files) = sync::oneshot::channel();
-    tx_file
-        .clone()
-        .send(MsgBuilder::AllFiles(tx_files))
-        .await
-        .unwrap_or_else(|_| panic!("Failed awaiting result"));
-    
-    if let Ok(files) = rx_files.await {
-        if files.contains(&"/README.md".into()) {
-            Response::builder()
-                .status(StatusCode::TEMPORARY_REDIRECT)
-                .header("Location", "/README.md".to_string())
-                .body(Full::from(bytes::Bytes::from_static(b"")))
-                .unwrap()
-        } else if files.contains(&"/Readme.md".into()) {
-            Response::builder()
-                .status(StatusCode::TEMPORARY_REDIRECT)
-                .header("Location", "/Readme.md".to_string())
-                .body(Full::from(bytes::Bytes::from_static(b"")))
-                .unwrap()
-        } else {
-            let result = format!(
-                "{}",
-                crate::ui::render_page(
-                    "/",
-                    crate::ui::Contents::NotFound(),
-                    &files[..]
-                )
-                .into_string()
-            );
+                let (tx_files, rx_files) = sync::oneshot::channel();
+                tx_file
+                    .clone()
+                    .send(MsgBuilder::AllFiles(tx_files))
+                    .await
+                    .unwrap_or_else(|_| panic!("Failed awaiting result"));
 
-    
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .header("Content-Type", "application/html; charset=utf-8".to_string())
-                .body(Full::from(result.into_bytes()))
-                .unwrap().into()
-        }
-    } else {
-        Response::builder()
-            .status(StatusCode::GONE)
-            .header("Content-Type", "application/html; charset=utf-8".to_string())
-            .body(Full::from(bytes::Bytes::from_static(b"<h1>Internal server error</h1>")))
-            .unwrap().into()
-    }
+                if let Ok(files) = rx_files.await {
+                    if files.contains(&"/README.md".into()) {
+                        Response::builder()
+                            .status(StatusCode::TEMPORARY_REDIRECT)
+                            .header("Location", "/README.md".to_string())
+                            .body(Full::from(bytes::Bytes::from_static(b"")))
+                            .unwrap()
+                    } else if files.contains(&"/Readme.md".into()) {
+                        Response::builder()
+                            .status(StatusCode::TEMPORARY_REDIRECT)
+                            .header("Location", "/Readme.md".to_string())
+                            .body(Full::from(bytes::Bytes::from_static(b"")))
+                            .unwrap()
+                    } else {
+                        let result = format!(
+                            "{}",
+                            crate::ui::render_page(
+                                "/",
+                                crate::ui::Contents::NotFound(),
+                                &files[..]
+                            )
+                            .into_string()
+                        );
+
+                        Response::builder()
+                            .status(StatusCode::NOT_FOUND)
+                            .header(
+                                "Content-Type",
+                                "application/html; charset=utf-8".to_string(),
+                            )
+                            .body(Full::from(result.into_bytes()))
+                            .unwrap()
+                            .into()
+                    }
+                } else {
+                    Response::builder()
+                        .status(StatusCode::GONE)
+                        .header(
+                            "Content-Type",
+                            "application/html; charset=utf-8".to_string(),
+                        )
+                        .body(Full::from(bytes::Bytes::from_static(
+                            b"<h1>Internal server error</h1>",
+                        )))
+                        .unwrap()
+                        .into()
+                }
             })
         })
         .fallback(get(|uri: Uri| async move {

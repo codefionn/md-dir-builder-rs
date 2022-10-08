@@ -144,7 +144,11 @@ async fn main() {
     log::debug!("Exited silently");
 }
 
-async fn servers_multiplexer(mut rx_srv: sync::mpsc::Receiver<MsgSrv>, tx4: sync::mpsc::Sender<MsgSrv>, tx6: sync::mpsc::Sender<MsgSrv>) {
+async fn servers_multiplexer(
+    mut rx_srv: sync::mpsc::Receiver<MsgSrv>,
+    tx4: sync::mpsc::Sender<MsgSrv>,
+    tx6: sync::mpsc::Sender<MsgSrv>,
+) {
     while let Some(msg) = rx_srv.recv().await {
         log::debug!("General server event: {:?}", msg);
 
@@ -179,8 +183,11 @@ async fn servers_multiplexer(mut rx_srv: sync::mpsc::Receiver<MsgSrv>, tx4: sync
     }
 }
 
-pub(crate) async fn why_is_this_necessary<T: Sized + Clone>(sender: &sync::mpsc::Sender<T>, ignore: T) {
-    for _ in 0..sender.capacity()+1 {
+pub(crate) async fn why_is_this_necessary<T: Sized + Clone>(
+    sender: &sync::mpsc::Sender<T>,
+    ignore: T,
+) {
+    for _ in 0..sender.capacity() + 1 {
         sender.send(ignore.clone()).await.ok();
     }
 }
