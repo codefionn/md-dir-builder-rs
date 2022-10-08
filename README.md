@@ -24,10 +24,9 @@ Currently markdown parsing is done with the ``pulldown-cmark`` library (like mdB
 
 ## TODO
 
-* Watch newly created directories
 * Handle connection losses to server
 * Adjustable IP-address (currently ``127.0.0.1`` and ``::1`` are used)
-* Document the stuff
+* Allow images in Markdown files
 
 ## Vendored dependencies
 
