@@ -16,7 +16,6 @@
  */
 use std::{collections::HashMap, sync::Arc};
 
-use bytes::BytesMut;
 use crc::Crc;
 
 use ahash::RandomState;

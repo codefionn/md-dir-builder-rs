@@ -20,7 +20,7 @@ use crate::msg::MsgInternalBuilder;
 use ahash::RandomState;
 use futures::Future;
 use std::{cmp::Ordering, collections::HashMap, path::Path, sync::Arc};
-use tokio::{sync::{self, Mutex}, task};
+use tokio::sync::{self, Mutex};
 
 #[cfg(feature = "watchman")]
 use watchman_client::prelude::*;
