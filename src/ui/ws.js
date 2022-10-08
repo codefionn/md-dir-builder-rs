@@ -32,6 +32,7 @@ function fetch_contents(pathname, successfn) {
   fetch("/.contents" + pathname)
       .then(response => response.text())
       .then(contents => {
+        document.title = pathname;
         comp_content.innerHTML = contents;
         if (typeof window.Prism === "object") {
           window.Prism.highlightAllUnder(comp_content);
