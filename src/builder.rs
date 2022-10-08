@@ -558,11 +558,9 @@ async fn watcher_notify(
 
     use notify::*;
 
-    let (tx, mut rx) = sync::mpsc::channel(crate::CHANNEL_COUNT);
-
     let mut watcher = RecommendedWatcher::new(
         move |res| {
-            tx.send(res);
+            log::debug!("FS-Event: {:?}", res);
         },
         Config::default(),
     )?;
@@ -570,10 +568,6 @@ async fn watcher_notify(
     watcher.watch(path.as_ref(), RecursiveMode::Recursive)?;
 
     log::debug!("Started watching paths with notify");
-
-    while let Some(res) = rx.recv().await {
-        log::debug!("FS-Event: {:?}", res);
-    }
 
     log::debug!("Exited watcher notify");
 

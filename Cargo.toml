@@ -19,7 +19,7 @@ inotify = { version = "0.10" }
 json = "0.12.4"
 log = "0.4.17"
 maud = "0"
-notify = { version = "5.0.0", default-features = false, features = [ "macos_kqueue", "serde" ], optional = true }
+notify = { version = "5.0.0", default-features = false, feature=["macos_kqueue"], optional = true }
 pulldown-cmark = "0.9"
 regex = "1.6"
 serde = { version = "1", features = [ "derive" ] }

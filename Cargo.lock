@@ -949,7 +949,6 @@ dependencies = [
  "kqueue",
  "libc",
  "mio",
- "serde",
  "walkdir",
  "winapi",
 ]
