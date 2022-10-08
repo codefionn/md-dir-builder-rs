@@ -16,6 +16,7 @@
  */
 use std::{collections::HashMap, sync::Arc};
 
+use bytes::BytesMut;
 use crc::Crc;
 
 use ahash::RandomState;
@@ -137,6 +138,86 @@ fn determine_real_path(path: &str) -> String {
     );
 }
 
+async fn request_just_file_contents(requested_file: String, tx_file: sync::mpsc::Sender<MsgBuilder>) -> impl IntoResponse {
+    log::debug!("Requested file contents: {}", requested_file);
+    let (tx_onefile, rx_onefile) = sync::oneshot::channel();
+    tx_file
+        .clone()
+        .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
+        .await
+        .unwrap_or_else(|_| panic!("Failed awaiting result"));
+    
+    if let Ok(result) = rx_onefile.await {
+        match result {
+            (Some(result), _files) => {
+                let result = format!(
+                    "{}",
+                    crate::ui::render_contents(crate::ui::Contents::Html(
+                        result.as_str()
+                    ))
+                    .into_string()
+                );
+    
+                (StatusCode::OK, Html(result))
+            }
+            (None, _files) => {
+                let result = format!(
+                    "{}",
+                    crate::ui::render_contents(crate::ui::Contents::NotFound())
+                        .into_string()
+                );
+    
+                (StatusCode::NOT_FOUND, Html(result))
+            }
+        }
+    } else {
+        (StatusCode::GONE, Html(format!("Internal server error")))
+    }
+}
+
+async fn request_file(requested_file: String, tx_file: sync::mpsc::Sender<MsgBuilder>) -> impl IntoResponse {
+    log::debug!("Requested file: {}", requested_file);
+    let (tx_onefile, rx_onefile) = sync::oneshot::channel();
+    tx_file
+        .clone()
+        .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
+        .await
+        .unwrap_or_else(|_| panic!("Failed awaiting result"));
+    
+    if let Ok(result) = rx_onefile.await {
+        match result {
+            (Some(result), files) => {
+                let result = format!(
+                    "{}",
+                    crate::ui::render_page(
+                        requested_file.as_str(),
+                        crate::ui::Contents::Html(result.as_str()),
+                        &files[..]
+                    )
+                    .into_string()
+                );
+    
+                (StatusCode::OK, Html(result))
+            }
+            (None, files) => {
+                let result = format!(
+                    "{}",
+                    crate::ui::render_page(
+                        requested_file.as_str(),
+                        crate::ui::Contents::NotFound(),
+                        &files[..]
+                    )
+                    .into_string()
+                );
+    
+                (StatusCode::NOT_FOUND, Html(result))
+            }
+        }
+    } else {
+        (StatusCode::GONE, Html(format!("Internal server error")))
+    }
+}
+
 pub async fn create_router(
     tx_file: sync::mpsc::Sender<MsgBuilder>,
 ) -> (Router, tokio::sync::mpsc::Sender<MsgSrv>, tokio::task::JoinHandle<()>) {
@@ -195,86 +276,64 @@ pub async fn create_router(
                 let requested_file = uri.path()["/.contents".len()..].to_string();
                 let requested_file = determine_real_path(&requested_file);
 
-                log::debug!("Requested file contents: {}", requested_file);
-                let (tx_onefile, rx_onefile) = sync::oneshot::channel();
-                tx_file
-                    .clone()
-                    .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
-                    .await
-                    .unwrap_or_else(|_| panic!("Failed awaiting result"));
+                request_just_file_contents(requested_file, tx_file).await
+            })
+        })
+        .route("/", {
+            let tx_file = tx_file.clone();
+            get(|| async move {
+    let (tx_files, rx_files) = sync::oneshot::channel();
+    tx_file
+        .clone()
+        .send(MsgBuilder::AllFiles(tx_files))
+        .await
+        .unwrap_or_else(|_| panic!("Failed awaiting result"));
+    
+    if let Ok(files) = rx_files.await {
+        if files.contains(&"/README.md".into()) {
+            Response::builder()
+                .status(StatusCode::TEMPORARY_REDIRECT)
+                .header("Location", "/README.md".to_string())
+                .body(Full::from(bytes::Bytes::from_static(b"")))
+                .unwrap()
+        } else if files.contains(&"/Readme.md".into()) {
+            Response::builder()
+                .status(StatusCode::TEMPORARY_REDIRECT)
+                .header("Location", "/Readme.md".to_string())
+                .body(Full::from(bytes::Bytes::from_static(b"")))
+                .unwrap()
+        } else {
+            let result = format!(
+                "{}",
+                crate::ui::render_page(
+                    "/",
+                    crate::ui::Contents::NotFound(),
+                    &files[..]
+                )
+                .into_string()
+            );
 
-                if let Ok(result) = rx_onefile.await {
-                    match result {
-                        (Some(result), _files) => {
-                            let result = format!(
-                                "{}",
-                                crate::ui::render_contents(crate::ui::Contents::Html(
-                                    result.as_str()
-                                ))
-                                .into_string()
-                            );
-
-                            (StatusCode::OK, Html(result))
-                        }
-                        (None, _files) => {
-                            let result = format!(
-                                "{}",
-                                crate::ui::render_contents(crate::ui::Contents::NotFound())
-                                    .into_string()
-                            );
-
-                            (StatusCode::NOT_FOUND, Html(result))
-                        }
-                    }
-                } else {
-                    (StatusCode::GONE, Html(format!("Internal server error")))
-                }
+    
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .header("Content-Type", "application/html; charset=utf-8".to_string())
+                .body(Full::from(result.into_bytes()))
+                .unwrap().into()
+        }
+    } else {
+        Response::builder()
+            .status(StatusCode::GONE)
+            .header("Content-Type", "application/html; charset=utf-8".to_string())
+            .body(Full::from(bytes::Bytes::from_static(b"<h1>Internal server error</h1>")))
+            .unwrap().into()
+    }
             })
         })
         .fallback(get(|uri: Uri| async move {
             let requested_file = uri.path().to_string();
             let requested_file = determine_real_path(&requested_file);
 
-            log::debug!("Requested file: {}", requested_file);
-            let (tx_onefile, rx_onefile) = sync::oneshot::channel();
-            tx_file
-                .clone()
-                .send(MsgBuilder::File(requested_file.clone(), tx_onefile))
-                .await
-                .unwrap_or_else(|_| panic!("Failed awaiting result"));
-
-            if let Ok(result) = rx_onefile.await {
-                match result {
-                    (Some(result), files) => {
-                        let result = format!(
-                            "{}",
-                            crate::ui::render_page(
-                                requested_file.as_str(),
-                                crate::ui::Contents::Html(result.as_str()),
-                                &files[..]
-                            )
-                            .into_string()
-                        );
-
-                        (StatusCode::OK, Html(result))
-                    }
-                    (None, files) => {
-                        let result = format!(
-                            "{}",
-                            crate::ui::render_page(
-                                requested_file.as_str(),
-                                crate::ui::Contents::NotFound(),
-                                &files[..]
-                            )
-                            .into_string()
-                        );
-
-                        (StatusCode::NOT_FOUND, Html(result))
-                    }
-                }
-            } else {
-                (StatusCode::GONE, Html(format!("Internal server error")))
-            }
+            return request_file(requested_file, tx_file).await;
         }));
 
     (router, tx, server_router_handle)
