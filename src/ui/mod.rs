@@ -17,6 +17,7 @@
 use std::cmp::Ordering;
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
+use regex::Regex;
 
 fn render_head(title: &str) -> Markup {
     let css = format!(
@@ -26,6 +27,8 @@ fn render_head(title: &str) -> Markup {
     );
 
     let css = css.replace("\n", "");
+    let whitespace = Regex::new(r"\s+").unwrap();
+    let css = whitespace.replace_all(css.as_str(), " ");
     html! {
         meta charset="utf-8";
         title { (title) }
