@@ -28,7 +28,7 @@ body {
   border-color: #000000;
 }
 
-#sidebar a, #sidebar a:link, #sidebar a:visited, #sidebar a:hover {
+#sidebar :is(a, a:link, a:visited, a:hover) {
   text-decoration: none;
   color: #000000;
 }
@@ -38,7 +38,7 @@ body {
   font-size: 0.91em;
 }
 
-#sidebar .dir > .file, #sidebar .dir > .dir  {
+#sidebar .dir > :is(.file, .dir)  {
   margin-left: 5px;
 }
 
