@@ -30,6 +30,8 @@ use std::fs;
 
 static IGNORE_DIRS: &[&'static str] = &[".git"];
 
+/// Searches for directories. Directories which are equal to any directory in `IGNORE_DIRS` are
+/// neither returned, nor searched through (they will be ignored by this function).
 fn broad_dir_search(path_str: &String) -> Box<Vec<String>> {
     let path_str_clone = std::rc::Rc::new(path_str.clone());
     let path = Path::new(&path_str);
@@ -77,6 +79,7 @@ fn broad_dir_search(path_str: &String) -> Box<Vec<String>> {
     }
 }
 
+/// Searches for all markdown files in a directory and returns their relative path (to `path_str`)
 fn broad_file_search(path_str: String) -> Vec<String> {
     let path_str_clone = std::rc::Rc::new(path_str.clone());
     let path = Path::new(&path_str);

@@ -183,6 +183,8 @@ async fn servers_multiplexer(
     }
 }
 
+/// This function exists, because a mpsc tokio channel wouldn't properly drain itself. This could
+/// tries to force that.
 pub(crate) async fn why_is_this_necessary<T: Sized + Clone>(
     sender: &sync::mpsc::Sender<T>,
     ignore: T,
