@@ -288,6 +288,8 @@ pub async fn create_router(
         .route("/", {
             let tx_file = tx_file.clone();
             get(|| async move {
+                log::debug!("Route: /");
+
                 let (tx_files, rx_files) = sync::oneshot::channel();
                 tx_file
                     .clone()
@@ -297,17 +299,17 @@ pub async fn create_router(
 
                 if let Ok(files) = rx_files.await {
                     if files.contains(&"/README.md".into()) {
-                        Response::builder()
-                            .status(StatusCode::TEMPORARY_REDIRECT)
-                            .header("Location", "/README.md".to_string())
-                            .body(Full::from(bytes::Bytes::from_static(b"")))
-                            .unwrap()
+                        (
+                            StatusCode::TEMPORARY_REDIRECT,
+                            [("Location", "/README.md")],
+                            Html(format!(""))
+                        ).into_response()
                     } else if files.contains(&"/Readme.md".into()) {
-                        Response::builder()
-                            .status(StatusCode::TEMPORARY_REDIRECT)
-                            .header("Location", "/Readme.md".to_string())
-                            .body(Full::from(bytes::Bytes::from_static(b"")))
-                            .unwrap()
+                        (
+                            StatusCode::TEMPORARY_REDIRECT,
+                            [("Location", "/Readme.md")],
+                            Html(format!(""))
+                        ).into_response()
                     } else {
                         let result = format!(
                             "{}",
@@ -319,34 +321,24 @@ pub async fn create_router(
                             .into_string()
                         );
 
-                        Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .header(
-                                "Content-Type",
-                                "application/html; charset=utf-8".to_string(),
-                            )
-                            .body(Full::from(result.into_bytes()))
-                            .unwrap()
-                            .into()
+                        (
+                            StatusCode::NOT_FOUND,
+                            Html(result)
+                        ).into_response()
                     }
                 } else {
-                    Response::builder()
-                        .status(StatusCode::GONE)
-                        .header(
-                            "Content-Type",
-                            "application/html; charset=utf-8".to_string(),
-                        )
-                        .body(Full::from(bytes::Bytes::from_static(
-                            b"<h1>Internal server error</h1>",
-                        )))
-                        .unwrap()
-                        .into()
+                    (
+                        StatusCode::GONE,
+                        Html(format!("<h1>Internal server error</h1>"))
+                    ).into_response()
                 }
             })
         })
         .fallback(get(|uri: Uri| async move {
             let requested_file = uri.path().to_string();
             let requested_file = determine_real_path(&requested_file);
+
+            log::debug!("Route: {}", requested_file);
 
             return request_file(requested_file, tx_file).await;
         }));
