@@ -154,8 +154,7 @@ async fn request_just_file_contents(
             (Some(result), _files) => {
                 let result = format!(
                     "{}",
-                    crate::ui::render_contents(crate::ui::Contents::Html(result.as_str()))
-                        .into_string()
+                    crate::ui::render_contents(crate::ui::Contents::Html(&result)).into_string()
                 );
 
                 (StatusCode::OK, Html(result))
@@ -193,7 +192,7 @@ async fn request_file(
                     "{}",
                     crate::ui::render_page(
                         requested_file.as_str(),
-                        crate::ui::Contents::Html(result.as_str()),
+                        crate::ui::Contents::Html(&result),
                         &files[..]
                     )
                     .into_string()
@@ -302,14 +301,16 @@ pub async fn create_router(
                         (
                             StatusCode::TEMPORARY_REDIRECT,
                             [("Location", "/README.md")],
-                            Html(format!(""))
-                        ).into_response()
+                            Html(format!("")),
+                        )
+                            .into_response()
                     } else if files.contains(&"/Readme.md".into()) {
                         (
                             StatusCode::TEMPORARY_REDIRECT,
                             [("Location", "/Readme.md")],
-                            Html(format!(""))
-                        ).into_response()
+                            Html(format!("")),
+                        )
+                            .into_response()
                     } else {
                         let result = format!(
                             "{}",
@@ -321,16 +322,14 @@ pub async fn create_router(
                             .into_string()
                         );
 
-                        (
-                            StatusCode::NOT_FOUND,
-                            Html(result)
-                        ).into_response()
+                        (StatusCode::NOT_FOUND, Html(result)).into_response()
                     }
                 } else {
                     (
                         StatusCode::GONE,
-                        Html(format!("<h1>Internal server error</h1>"))
-                    ).into_response()
+                        Html(format!("<h1>Internal server error</h1>")),
+                    )
+                        .into_response()
                 }
             })
         })
@@ -364,6 +363,7 @@ async fn handle_ws_socket(socket: WebSocket, state: WsState) {
             match msg {
                 MsgSrv::File(path, content) => {
                     // Send the client update of the content
+                    let content: json::JsonValue = content.into();
                     if let Err(err) = send_msg(
                         &mut sender,
                         json::object! {

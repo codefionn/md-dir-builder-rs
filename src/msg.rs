@@ -16,10 +16,12 @@
  */
 use tokio::sync;
 
+use crate::builder::BuiltFile;
+
 #[derive(PartialEq, Eq, Debug)]
 pub enum MsgSrv {
     /// Announces a file change
-    File(/* path: */ String, /* content: */ String),
+    File(/* path: */ String, /* content: */ BuiltFile),
     /// Announces a new file (without contents because they're definitly not required)
     NewFile(/* path: */ String, /* all_files: */ Vec<String>),
     Exit(),
@@ -30,7 +32,8 @@ pub enum MsgBuilder {
     /// Requests a file from the builder
     File(
         /* path: */ String,
-        /* result: */ sync::oneshot::Sender<(Option<String>, /* all_files: */ Vec<String>)>,
+        /* result: */
+        sync::oneshot::Sender<(Option<BuiltFile>, /* all_files: */ Vec<String>)>,
     ),
     AllFiles(
         /* result: */ sync::oneshot::Sender</* all_files: */ Vec<String>>,

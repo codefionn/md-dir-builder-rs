@@ -19,11 +19,29 @@ use crate::msg::MsgBuilder;
 use crate::msg::MsgInternalBuilder;
 use ahash::RandomState;
 use futures::Future;
+use regex::Regex;
+use serde::Deserialize;
+use serde::Serialize;
 use std::{cmp::Ordering, collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::{self, Mutex};
 
 #[cfg(feature = "watchman")]
 use watchman_client::prelude::*;
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct BuiltFile {
+    pub contents: String,
+    pub word_count: usize,
+}
+
+impl Into<json::JsonValue> for BuiltFile {
+    fn into(self) -> json::JsonValue {
+        json::object! {
+            "contents": self.contents,
+            "word_count": self.word_count
+        }
+    }
+}
 
 use super::MsgSrv;
 use std::fs;
@@ -135,7 +153,7 @@ async fn process_file<
 >(
     dir: &Path,
     file_str: &String,
-    map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+    map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
     fs_read_file: ReadFile,
@@ -153,8 +171,15 @@ async fn process_file<
     let path = dir.join(file_str);
     match fs_read_file(path.to_string_lossy().to_string()) {
         Ok(result) => {
-            let html = crate::markdown::CommonMarkParser::default().parse_to_html(result.as_str());
-            map.lock().await.insert(webpath.clone(), html);
+            let result = result.as_str();
+            let html = crate::markdown::CommonMarkParser::default().parse_to_html(result);
+            map.lock().await.insert(
+                webpath.clone(),
+                BuiltFile {
+                    contents: html,
+                    word_count: count_words(result),
+                },
+            );
             let mut files = files.lock().await;
             if !files.contains(&webpath) {
                 files.push(webpath.clone());
@@ -262,7 +287,7 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
         return;
     }
 
-    let map: Arc<Mutex<HashMap<String, String, RandomState>>> = Arc::new(Mutex::new(
+    let map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>> = Arc::new(Mutex::new(
         HashMap::with_capacity_and_hasher(1, RandomState::new()),
     ));
 
@@ -362,7 +387,7 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
 async fn server_queries(
     mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
-    map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+    map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
 ) {
     log::debug!("Started file communication");
@@ -403,6 +428,31 @@ async fn server_queries(
     log::debug!("Exited file communication");
 }
 
+fn count_words(words: &str) -> usize {
+    let regexs_replace: Vec<Regex> = [Regex::new("^\"")]
+        .into_iter()
+        .map(|r| r.unwrap())
+        .collect();
+
+    let regexs: Vec<Regex> = [
+        Regex::new(r"^[a-zA-Z0-9.]+$"),
+        Regex::new(r"[0-9]+([,.][0-9]+)?"),
+    ]
+    .into_iter()
+    .map(|r| r.unwrap())
+    .collect();
+
+    words
+        .split(|c| c == '\n' || c == ' ')
+        .map(move |w| {
+            regexs_replace
+                .iter()
+                .fold(w.to_string(), |w, r| r.replace(w.as_str(), "").to_string())
+        })
+        .filter(move |w| regexs.iter().any(|r| r.is_match(w)))
+        .count()
+}
+
 async fn file_builder<
     ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync,
 >(
@@ -411,7 +461,7 @@ async fn file_builder<
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
-    map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+    map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
     fs_read_file: ReadFile,
 ) {
@@ -486,7 +536,7 @@ async fn initial_build<
     files_to_build: Vec<String>,
     path_str: String,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
-    map: Arc<Mutex<HashMap<String, String, RandomState>>>,
+    map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
     fs_read_file: ReadFile,
 ) {

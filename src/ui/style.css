@@ -1,6 +1,9 @@
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body {
+html,
+body {
   min-height: 100%;
   max-height: 100%;
   overflow: hidden;
@@ -38,7 +41,7 @@ body {
   font-size: 0.91em;
 }
 
-#sidebar .dir > :is(.file, .dir)  {
+#sidebar .dir> :is(.file, .dir) {
   margin-left: 5px;
 }
 
@@ -53,5 +56,11 @@ body {
 #info {
   position: absolute;
   bottom: 5px;
+  right: 20px;
+}
+
+#contents #words {
+  position: fixed;
+  top: 5px;
   right: 20px;
 }

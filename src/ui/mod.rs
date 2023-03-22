@@ -14,10 +14,23 @@
  *
  *  You should have received a copy of the GNU General Public License
  */
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 use regex::Regex;
+
+use crate::builder::BuiltFile;
+
+fn hash(s: &'static str) -> u64 {
+    let mut hasher = DefaultHasher::default();
+    s.hash(&mut hasher);
+
+    hasher.finish()
+}
 
 fn render_head(title: &str) -> Markup {
     let css = format!(
@@ -33,9 +46,9 @@ fn render_head(title: &str) -> Markup {
         meta charset="utf-8";
         title { (title) }
         meta name="description" content=(format!("{}", title));
-        script src="/.rsc/ws.js" defer {
+        script src=(format!("/.rsc/ws.js?{}", hash(include_str!("./ws.js")))) defer {
         }
-        script src="/.rsc/prism.js" defer {
+        script src=(format!("/.rsc/prism.js?{}", hash(include_str!("./prism.js")))) defer {
         }
         style {
             (PreEscaped(css))
@@ -164,7 +177,17 @@ pub fn render_contents<'a>(contents: Contents<'a>) -> Markup {
     html! {
         main {
             @match contents {
-                Contents::Html(html_contents) => (PreEscaped(html_contents)),
+                Contents::Html(html_contents) => div {
+                    div id="built-content" {
+                        (PreEscaped(html_contents.contents.as_str()))
+                    }
+
+                    div id="words" {
+                        "Words: " span id="word-count" {
+                            (html_contents.word_count)
+                        }
+                    }
+                },
                 Contents::Text(text) =>  pre { (text) },
                 Contents::NotFound() => "404 - Not found"
             }
@@ -173,7 +196,7 @@ pub fn render_contents<'a>(contents: Contents<'a>) -> Markup {
 }
 
 pub enum Contents<'a> {
-    Html(&'a str),
+    Html(&'a BuiltFile),
     Text(&'a str),
     NotFound(),
 }
