@@ -94,8 +94,14 @@ async fn test_initial_build() {
     assert!(builder_handle.await.is_ok());
 
     assert_eq!(2, files.len(), "Expected 2 files");
-    assert_eq!(Some(format!("<h1>README</h1>\n")), file);
-    assert_eq!(Some(format!("<h1>test header</h1>\n")), file_test);
+    assert_eq!(
+        Some(format!("<h1>README</h1>\n")),
+        file.map(|file| file.contents)
+    );
+    assert_eq!(
+        Some(format!("<h1>test header</h1>\n")),
+        file_test.map(|file_test| file_test.contents)
+    );
 }
 
 #[tokio::test]
@@ -142,6 +148,12 @@ async fn test_add_file() {
     assert!(builder_handle.await.is_ok());
 
     assert_eq!(2, files.len(), "Expected 2 files");
-    assert_eq!(Some(format!("<h1>README</h1>\n")), file);
-    assert_eq!(Some(format!("<h1>test header</h1>\n")), file_test);
+    assert_eq!(
+        Some(format!("<h1>README</h1>\n")),
+        file.map(|file| file.contents)
+    );
+    assert_eq!(
+        Some(format!("<h1>test header</h1>\n")),
+        file_test.map(|file_test| file_test.contents)
+    );
 }
