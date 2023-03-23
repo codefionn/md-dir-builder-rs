@@ -23,10 +23,8 @@ pub struct CommonMarkParser {}
 impl CommonMarkParser {
     fn create_options() -> Options {
         // Enable some default quality of live improvements
-        let mut options = Options::empty();
-        options.insert(Options::ENABLE_STRIKETHROUGH);
-        options.insert(Options::ENABLE_FOOTNOTES);
-        options.insert(Options::ENABLE_TABLES);
+        let mut options =
+            Options::ENABLE_STRIKETHROUGH | Options::ENABLE_FOOTNOTES | Options::ENABLE_TABLES;
 
         options
     }
