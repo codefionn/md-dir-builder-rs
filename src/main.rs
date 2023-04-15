@@ -34,7 +34,7 @@ use tokio::{sync, task};
 
 pub(crate) const CHANNEL_COUNT: usize = 32;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub enum ParserType {
     CommonMark,
     Pandoc,
@@ -120,7 +120,14 @@ async fn main() {
     );
 
     let builder_handle = task::spawn(async move {
-        builder::builder(tx_srv, args.directory, tx_file.clone(), rx_file).await;
+        builder::builder(
+            args.parser,
+            tx_srv,
+            args.directory,
+            tx_file.clone(),
+            rx_file,
+        )
+        .await;
     });
 
     if !args.no_open {

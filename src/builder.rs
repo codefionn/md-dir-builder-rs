@@ -1,3 +1,4 @@
+use crate::ParserType;
 /*
  *  md-dir-builder serve markdown files in a given directory
  *  Copyright (C) 2022 Fionn Langhans
@@ -151,6 +152,7 @@ fn broad_file_search(path_str: String) -> Vec<String> {
 async fn process_file<
     ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync,
 >(
+    parser_type: ParserType,
     dir: &Path,
     file_str: &String,
     map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
@@ -172,7 +174,15 @@ async fn process_file<
     match fs_read_file(path.to_string_lossy().to_string()) {
         Ok(result) => {
             let result = result.as_str();
-            let html = crate::markdown::CommonMarkParser::default().parse_to_html(result);
+            let html = match parser_type {
+                ParserType::CommonMark => {
+                    crate::markdown::CommonMarkParser::default().parse_to_html(result)
+                }
+                ParserType::Pandoc => {
+                    crate::markdown::PandocParser::default().parse_to_html(result)
+                }
+            };
+
             map.lock().await.insert(
                 webpath.clone(),
                 BuiltFile {
@@ -219,6 +229,7 @@ async fn sort_files(files: Arc<Mutex<Vec<String>>>) {
 ///
 /// This watches the given directory ``path_str`` and rebuilds new or modified files.
 pub async fn builder(
+    parser_type: ParserType,
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
     tx_file: sync::mpsc::Sender<MsgBuilder>,
@@ -237,6 +248,7 @@ pub async fn builder(
     let fs_change = watch_inotify;
 
     builder_with_fs_change(
+        parser_type,
         tx_srv,
         path_str,
         tx_file,
@@ -260,6 +272,7 @@ fn std_read_file(s: String) -> anyhow::Result<String> {
 ///
 /// This watches the given directory ``path_str`` and rebuilds new or modified files.
 pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
+    parser_type: ParserType,
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
     tx_file: sync::mpsc::Sender<MsgBuilder>,
@@ -324,6 +337,7 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
         let tx_file = tx_file.clone();
 
         file_builder(
+            parser_type,
             rx_builder,
             tx_file,
             tx_srv,
@@ -344,6 +358,7 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
         let fs_read_file = fs_read_file.clone();
 
         initial_build(
+            parser_type,
             files_to_build,
             path_str,
             processing,
@@ -456,6 +471,7 @@ fn count_words(words: &str) -> usize {
 async fn file_builder<
     ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync,
 >(
+    parser_type: ParserType,
     mut rx_builder: sync::mpsc::Receiver<MsgInternalBuilder>,
     tx_file: sync::mpsc::Sender<MsgBuilder>,
     tx_srv: sync::mpsc::Sender<MsgSrv>,
@@ -476,6 +492,7 @@ async fn file_builder<
                 let webpath = format!("/{}", file);
                 if !files.lock().await.contains(&webpath) {
                     if process_file(
+                        parser_type,
                         &path,
                         &file,
                         map.clone(),
@@ -500,6 +517,7 @@ async fn file_builder<
             }
             MsgInternalBuilder::FileModified(file) => {
                 if process_file(
+                    parser_type,
                     &path,
                     &file,
                     map.clone(),
@@ -533,6 +551,7 @@ async fn file_builder<
 async fn initial_build<
     ReadFile: Fn(String) -> anyhow::Result<String> + Clone + std::marker::Sync,
 >(
+    parser_type: ParserType,
     files_to_build: Vec<String>,
     path_str: String,
     processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
@@ -546,7 +565,16 @@ async fn initial_build<
         let processing = processing.clone();
         let files = files.clone();
         let path = Path::new(&path_str);
-        process_file(path, &file, map, files, processing, fs_read_file.clone()).await;
+        process_file(
+            parser_type,
+            path,
+            &file,
+            map,
+            files,
+            processing,
+            fs_read_file.clone(),
+        )
+        .await;
     }
 
     sort_files(files).await;

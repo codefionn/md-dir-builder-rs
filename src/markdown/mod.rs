@@ -16,7 +16,9 @@
  */
 mod cache;
 mod commonmark;
+mod pandoc;
 pub use commonmark::CommonMarkParser;
+pub use pandoc::PandocParser;
 
 /// Generic for parsing markdown to html
 pub trait MarkdownParser {

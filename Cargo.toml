@@ -1,6 +1,6 @@
 [package]
 name = "md-dir-builder"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 authors = [ "Fionn Langhans <fionn.langhans@gmail.com" ]
