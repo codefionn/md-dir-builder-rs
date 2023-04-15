@@ -3,6 +3,7 @@ use std::time::Duration;
 use crate::{
     builder::*,
     msg::{MsgBuilder, MsgInternalBuilder, MsgSrv},
+    ParserType,
 };
 use simplelog::{CombinedLogger, TermLogger, TerminalMode};
 use tokio::{sync, task};
@@ -65,6 +66,7 @@ async fn test_initial_build() {
 
         task::spawn(async move {
             builder_with_fs_change(
+                ParserType::CommonMark,
                 tx_srv,
                 ".".to_string(),
                 tx_file,
@@ -116,6 +118,7 @@ async fn test_add_file() {
 
         task::spawn(async move {
             builder_with_fs_change(
+                ParserType::CommonMark,
                 tx_srv,
                 ".".to_string(),
                 tx_file.clone(),
