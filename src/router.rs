@@ -123,7 +123,7 @@ struct WsState {
 }
 
 fn determine_real_path(path: &str) -> String {
-    return format!(
+    format!(
         "/{}",
         path.split('/')
             .map(|part| urlencoding::decode(part).unwrap().to_string())
@@ -134,7 +134,7 @@ fn determine_real_path(path: &str) -> String {
                     format!("{}/{}", a, b)
                 }
             })
-    );
+    )
 }
 
 async fn request_just_file_contents(
@@ -269,9 +269,7 @@ pub async fn create_router(
         .route("/.rsc/ws.js", get(ws_js_file))
         .route("/.rsc/prism.js", get(prism_js_file))
         .route("/.ws", get(handle_ws))
-        .layer(Extension(WsState {
-            ws_channels: ws_channels.clone(),
-        }))
+        .layer(Extension(WsState { ws_channels }))
         .route("/.ping", get(ping))
         .route("/.api", post(|| async {}))
         .route("/.license", get_full_text_page!("../LICENSE", tx_file))
@@ -339,7 +337,7 @@ pub async fn create_router(
 
             log::debug!("Route: {}", requested_file);
 
-            return request_file(requested_file, tx_file).await;
+            request_file(requested_file, tx_file).await
         }));
 
     (router, tx, server_router_handle)

@@ -18,21 +18,13 @@ use super::MarkdownParser;
 
 use pulldown_cmark::{html, Options, Parser};
 
+#[derive(Default)]
 pub struct CommonMarkParser {}
 
 impl CommonMarkParser {
     fn create_options() -> Options {
         // Enable some default quality of live improvements
-        let mut options =
-            Options::ENABLE_STRIKETHROUGH | Options::ENABLE_FOOTNOTES | Options::ENABLE_TABLES;
-
-        options
-    }
-}
-
-impl Default for CommonMarkParser {
-    fn default() -> Self {
-        CommonMarkParser {}
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_FOOTNOTES | Options::ENABLE_TABLES
     }
 }
 

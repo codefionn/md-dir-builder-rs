@@ -20,13 +20,8 @@ use std::{
     process::{self, Stdio},
 };
 
+#[derive(Default)]
 pub struct PandocParser {}
-
-impl Default for PandocParser {
-    fn default() -> Self {
-        PandocParser {}
-    }
-}
 
 impl MarkdownParser for PandocParser {
     fn parse_to_html(&mut self, markdown: &str) -> String {
@@ -43,9 +38,8 @@ impl MarkdownParser for PandocParser {
                 {
                     let mut stdin = handle.stdin.as_ref().unwrap();
                     let mut writer = BufWriter::new(&mut stdin);
-                    writer.write_all(markdown.as_bytes());
+                    let _ = writer.write_all(markdown.as_bytes());
                     drop(writer);
-                    drop(stdin);
                 }
 
                 if handle.wait().is_err() {

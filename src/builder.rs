@@ -35,11 +35,11 @@ pub struct BuiltFile {
     pub word_count: usize,
 }
 
-impl Into<json::JsonValue> for BuiltFile {
-    fn into(self) -> json::JsonValue {
+impl From<BuiltFile> for json::JsonValue {
+    fn from(bf: BuiltFile) -> Self {
         json::object! {
-            "contents": self.contents,
-            "word_count": self.word_count
+            "contents": bf.contents,
+            "word_count": bf.word_count
         }
     }
 }
@@ -47,11 +47,11 @@ impl Into<json::JsonValue> for BuiltFile {
 use super::MsgSrv;
 use std::fs;
 
-static IGNORE_DIRS: &[&'static str] = &[".git"];
+static IGNORE_DIRS: &[&str] = &[".git"];
 
 /// Searches for directories. Directories which are equal to any directory in `IGNORE_DIRS` are
 /// neither returned, nor searched through (they will be ignored by this function).
-fn broad_dir_search(path_str: &String) -> Box<Vec<String>> {
+fn broad_dir_search(path_str: &String) -> Vec<String> {
     let path_str_clone = std::rc::Rc::new(path_str.clone());
     let path = Path::new(&path_str);
     if let Ok(files) = path.read_dir() {
@@ -61,20 +61,18 @@ fn broad_dir_search(path_str: &String) -> Box<Vec<String>> {
                     let file_name = std::rc::Rc::new(entry.file_name().into_string().unwrap());
                     if entry.path().is_dir() {
                         if IGNORE_DIRS.contains(&file_name.as_str()) {
-                            Box::new(vec![])
+                            vec![]
                         } else {
                             let file_name_iter = [file_name.to_string()];
                             let newdir = format!("{}/{}", &path_str_clone, file_name);
-                            Box::new(
-                                broad_dir_search(&newdir)
-                                    .iter()
-                                    .map(|path| format!("{}/{}", file_name, path))
-                                    .chain(file_name_iter)
-                                    .collect(),
-                            )
+                            broad_dir_search(&newdir)
+                                .iter()
+                                .map(|path| format!("{}/{}", file_name, path))
+                                .chain(file_name_iter)
+                                .collect()
                         }
                     } else {
-                        Box::new(vec![])
+                        vec![]
                     }
                 }
                 Err(err) => {
@@ -84,17 +82,17 @@ fn broad_dir_search(path_str: &String) -> Box<Vec<String>> {
                         err
                     );
 
-                    Box::new(vec![])
+                    vec![]
                 }
             })
-            .fold(Box::new(vec![]), |mut x, mut y| {
+            .fold(vec![], |mut x, mut y| {
                 x.append(&mut y);
                 x
             })
     } else {
         log::error!("Could not read directory {}", path_str);
 
-        Box::new(vec![])
+        vec![]
     }
 }
 
@@ -104,7 +102,7 @@ fn broad_file_search(path_str: String) -> Vec<String> {
     let path = Path::new(&path_str);
     if let Ok(files) = path.read_dir() {
         files
-            .map(|entry| match entry {
+            .flat_map(|entry| match entry {
                 Ok(entry) => {
                     let file_name = std::rc::Rc::new(entry.file_name().into_string().unwrap());
                     if entry.path().is_dir() {
@@ -117,12 +115,10 @@ fn broad_file_search(path_str: String) -> Vec<String> {
                                 .map(|path| format!("{}/{}", file_name, path))
                                 .collect()
                         }
+                    } else if file_name.ends_with(".md") {
+                        vec![format!("{}", file_name)]
                     } else {
-                        if file_name.ends_with(".md") {
-                            vec![format!("{}", file_name)]
-                        } else {
-                            vec![]
-                        }
+                        vec![]
                     }
                 }
                 Err(err) => {
@@ -134,7 +130,6 @@ fn broad_file_search(path_str: String) -> Vec<String> {
                     vec![]
                 }
             })
-            .flatten()
             .collect()
     } else {
         log::error!("Could not read directory {}", path_str);
@@ -142,6 +137,8 @@ fn broad_file_search(path_str: String) -> Vec<String> {
         vec![]
     }
 }
+
+pub type ProcessingMap = HashMap<String, Arc<Mutex<()>>, RandomState>;
 
 /// Process a markdown file. Converts it to HTML and saves the result in ``map``.
 /// During processing, the a lock is generated in ``processing``.
@@ -157,7 +154,7 @@ async fn process_file<
     file_str: &String,
     map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
-    processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    processing: Arc<Mutex<ProcessingMap>>,
     fs_read_file: ReadFile,
 ) -> bool {
     let webpath = format!("/{}", file_str);
@@ -209,13 +206,13 @@ async fn process_file<
 
     log::debug!("Processed file {}", webpath);
 
-    return success;
+    success
 }
 
 async fn sort_files(files: Arc<Mutex<Vec<String>>>) {
     files.lock().await.sort_by(|a, b| -> Ordering {
-        let cnt_dir_a = a.matches("/").count();
-        let cnt_dir_b = b.matches("/").count();
+        let cnt_dir_a = a.matches('/').count();
+        let cnt_dir_b = b.matches('/').count();
 
         if cnt_dir_a != cnt_dir_b {
             cnt_dir_b.cmp(&cnt_dir_a)
@@ -306,9 +303,9 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
 
     let files: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::with_capacity(1)));
 
-    let processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>> = Arc::new(
-        Mutex::new(HashMap::with_capacity_and_hasher(1, RandomState::new())),
-    );
+    let processing: Arc<Mutex<ProcessingMap>> = Arc::new(Mutex::new(
+        HashMap::with_capacity_and_hasher(1, RandomState::new()),
+    ));
 
     let files_to_build = {
         let path_str = path_str.clone();
@@ -384,10 +381,10 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
         }
     };
 
-    let server_queries_handle = tokio::spawn(async move { server_queries_handle.await });
-    let file_builder_handle = tokio::spawn(async move { file_builder_handle.await });
-    let initial_build_handle = tokio::spawn(async move { initial_build_handle.await });
-    let fs_change_handle = tokio::spawn(async move { fs_change_handle.await });
+    let server_queries_handle = tokio::spawn(server_queries_handle);
+    let file_builder_handle = tokio::spawn(file_builder_handle);
+    let initial_build_handle = tokio::spawn(initial_build_handle);
+    let fs_change_handle = tokio::spawn(fs_change_handle);
 
     let _ = tokio::join!(
         server_queries_handle,
@@ -401,7 +398,7 @@ pub async fn builder_with_fs_change<R, T, ReadFile, BroadFileSearch>(
 
 async fn server_queries(
     mut rx_file: sync::mpsc::Receiver<MsgBuilder>,
-    processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    processing: Arc<Mutex<ProcessingMap>>,
     map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
 ) {
@@ -476,7 +473,7 @@ async fn file_builder<
     tx_file: sync::mpsc::Sender<MsgBuilder>,
     tx_srv: sync::mpsc::Sender<MsgSrv>,
     path_str: String,
-    processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    processing: Arc<Mutex<ProcessingMap>>,
     map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
     fs_read_file: ReadFile,
@@ -490,10 +487,10 @@ async fn file_builder<
         match msg {
             MsgInternalBuilder::FileCreated(file) => {
                 let webpath = format!("/{}", file);
-                if !files.lock().await.contains(&webpath) {
-                    if process_file(
+                if !files.lock().await.contains(&webpath)
+                    && process_file(
                         parser_type,
-                        &path,
+                        path,
                         &file,
                         map.clone(),
                         files.clone(),
@@ -501,24 +498,23 @@ async fn file_builder<
                         fs_read_file.clone(),
                     )
                     .await
-                    {
-                        log::debug!(
-                            "Sending processed file {} to server (is_new: {})",
-                            webpath,
-                            true
-                        );
-                        sort_files(files.clone()).await;
-                        tx_srv
-                            .send(MsgSrv::NewFile(webpath, files.lock().await.clone()))
-                            .await
-                            .unwrap();
-                    }
+                {
+                    log::debug!(
+                        "Sending processed file {} to server (is_new: {})",
+                        webpath,
+                        true
+                    );
+                    sort_files(files.clone()).await;
+                    tx_srv
+                        .send(MsgSrv::NewFile(webpath, files.lock().await.clone()))
+                        .await
+                        .unwrap();
                 }
             }
             MsgInternalBuilder::FileModified(file) => {
                 if process_file(
                     parser_type,
-                    &path,
+                    path,
                     &file,
                     map.clone(),
                     files.clone(),
@@ -554,7 +550,7 @@ async fn initial_build<
     parser_type: ParserType,
     files_to_build: Vec<String>,
     path_str: String,
-    processing: Arc<Mutex<HashMap<String, Arc<Mutex<()>>, RandomState>>>,
+    processing: Arc<Mutex<ProcessingMap>>,
     map: Arc<Mutex<HashMap<String, BuiltFile, RandomState>>>,
     files: Arc<Mutex<Vec<String>>>,
     fs_read_file: ReadFile,
@@ -637,7 +633,7 @@ async fn watch_inotify(
                         log::debug!("Directory created: {}/{:?}", dir, event.name);
                         wd_to_dir.insert(
                             inotify.add_watch(
-                                file.to_string(),
+                                &file,
                                 WatchMask::MODIFY | WatchMask::CREATE | WatchMask::DELETE,
                             )?,
                             file.to_string(),

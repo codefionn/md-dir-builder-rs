@@ -39,7 +39,7 @@ fn render_head(title: &str) -> Markup {
         include_str!("./prism.css")
     );
 
-    let css = css.replace("\n", "");
+    let css = css.replace('\n', "");
     let whitespace = Regex::new(r"\s+").unwrap();
     let css = whitespace.replace_all(css.as_str(), " ");
     html! {
@@ -123,7 +123,7 @@ fn split_dirs<'a>(
         dirs.push((last_dir, &files[start_index..current_index]));
     }
 
-    return dirs;
+    dirs
 }
 
 #[inline]
@@ -133,7 +133,7 @@ fn render_sidebar_dir(files: &[&Vec<&str>], depth: usize) -> Markup {
     let files: Vec<&Vec<&str>> = files
         .iter()
         .filter(|&f| f.len() == depth + 1)
-        .map(|&f| f)
+        .copied()
         .collect();
 
     html! {
@@ -146,7 +146,7 @@ fn render_sidebar_dir(files: &[&Vec<&str>], depth: usize) -> Markup {
                     (format!("/{}", dir))
                 }
 
-                (render_sidebar_dir(&dirs[..], depth + 1))
+                (render_sidebar_dir(dirs, depth + 1))
             }
         }
     }
@@ -173,7 +173,7 @@ pub fn render_sidebar(files: &[String]) -> Markup {
 }
 
 /// Renders the page's main contents
-pub fn render_contents<'a>(contents: Contents<'a>) -> Markup {
+pub fn render_contents(contents: Contents) -> Markup {
     html! {
         main {
             @match contents {
@@ -202,7 +202,7 @@ pub enum Contents<'a> {
 }
 
 /// Renders just the body
-fn render_body<'a>(contents: Contents<'a>, files: &[String]) -> Markup {
+fn render_body(contents: Contents, files: &[String]) -> Markup {
     html! {
         nav id="sidebar" {
             (render_sidebar(files))
@@ -219,7 +219,7 @@ fn render_body<'a>(contents: Contents<'a>, files: &[String]) -> Markup {
 }
 
 /// Renders to whole HTML Page
-pub fn render_page<'a>(title: &str, contents: Contents<'a>, files: &[String]) -> Markup {
+pub fn render_page(title: &str, contents: Contents, files: &[String]) -> Markup {
     html! {
         (DOCTYPE)
         html {
